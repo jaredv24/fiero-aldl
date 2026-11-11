@@ -8,6 +8,8 @@ Examples:
     python aldl_logger.py --simulate                 # try it with no car
     python aldl_logger.py --list-ports               # find your Arduino
     python aldl_logger.py --port auto                # find it automatically
+    python aldl_logger.py --cable --mode raw         # USB ALDL cable, no Arduino
+                                                     # (run cable_check.py first)
     python aldl_logger.py --port COM3 --mode pulses  # check the signal
     python aldl_logger.py --port COM3 --mode raw     # see raw bytes change
     python aldl_logger.py --port COM3 --log idle.csv # dashboard + CSV log
@@ -98,6 +100,15 @@ def fmt_value(value, p):
 # --------------------------------------------------------------------------
 # Data sources
 # --------------------------------------------------------------------------
+
+def load_cable_settings():
+    path = os.path.join(HERE, "cable_settings.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
 
 def find_port():
     """Pick the Arduino's serial port automatically (Mac, Windows or Linux)."""
@@ -394,8 +405,12 @@ def main(argv=None):
     ap.add_argument("--def", dest="definition", help="definition JSON (byte layout)")
     ap.add_argument("--log", metavar="CSV", help="write decoded values to a CSV file")
     ap.add_argument("--capture", metavar="TXT", help="save everything received, for --replay")
-    ap.add_argument("--invert", action="store_true", help="tell the Arduino the active level is high")
-    ap.add_argument("--lsb", action="store_true", help="tell the Arduino bytes are LSB first")
+    ap.add_argument("--cable", action="store_true",
+                    help="read a USB ALDL cable directly instead of the Arduino "
+                         "(uses the settings saved by cable_check.py)")
+    ap.add_argument("--cable-baud", type=int, help="serial speed for --cable (default 2400)")
+    ap.add_argument("--invert", action="store_true", help="the signal's active level is the other way round")
+    ap.add_argument("--lsb", action="store_true", help="bytes are sent least significant bit first")
     args = ap.parse_args(argv)
 
     if os.name == "nt":
@@ -416,17 +431,28 @@ def main(argv=None):
     elif args.replay:
         src = ReplaySource(args.replay)
         default_def = DEFAULT_DEF
+    elif args.cable:
+        import aldl160
+        settings = load_cable_settings()
+        baud = args.cable_baud or settings.get("baud", aldl160.DEFAULT_CABLE_BAUD)
+        invert = args.invert or settings.get("invert", False)
+        port = find_port() if args.port in (None, "auto") else args.port
+        print(f"Using cable on {port} at {baud} baud{' (inverted)' if invert else ''}")
+        if args.mode == "pulses":
+            ap.error("--mode pulses is for the Arduino; for a cable run cable_check.py")
+        src = aldl160.CableSource(port, baud, invert, msb_first=not args.lsb)
+        default_def = DEFAULT_DEF
     elif args.port:
         port = find_port() if args.port == "auto" else args.port
         print(f"Using serial port {port}")
         src = SerialSource(port)
         default_def = DEFAULT_DEF
     else:
-        ap.error("give --port, --simulate or --replay (use --list-ports to find the port)")
+        ap.error("give --port, --cable, --simulate or --replay (use --list-ports to find the port)")
 
-    if args.invert:
+    if args.invert and not args.cable:
         src.send("i")
-    if args.lsb:
+    if args.lsb and not args.cable:
         src.send("b")
 
     definition = load_definition(args.definition or default_def)

@@ -4,3 +4,4 @@ arduino/test/test_decoder
 .venv/
 logs/*
 !logs/.gitkeep
+python/cable_settings.json

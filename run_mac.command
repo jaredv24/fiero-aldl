@@ -21,18 +21,26 @@ stamp=$(date +%Y%m%d-%H%M%S)
 echo
 echo "Fiero ALDL Reader"
 echo "  1) Demo with no car (simulator)"
-echo "  2) Check the signal (key on)"
+echo
+echo "  USB ALDL cable:"
+echo "  2) Check the cable (key ON) - do this first"
 echo "  3) Raw bytes (work out which byte is which)"
 echo "  4) Live dashboard + record a log"
-echo "  5) Same as 4, but with --invert"
-read -r -p "Choose 1-5: " choice
+echo
+echo "  Arduino interface:"
+echo "  5) Check the signal (key ON)"
+echo "  6) Raw bytes"
+echo "  7) Live dashboard + record a log"
+read -r -p "Choose 1-7: " choice
 
 case "$choice" in
   1) $PY aldl_logger.py --simulate ;;
-  2) $PY aldl_logger.py --port auto --mode pulses ;;
-  3) $PY aldl_logger.py --port auto --mode raw --capture "../logs/raw-$stamp.txt" ;;
-  4) $PY aldl_logger.py --port auto --log "../logs/log-$stamp.csv" --capture "../logs/cap-$stamp.txt" ;;
-  5) $PY aldl_logger.py --port auto --invert --log "../logs/log-$stamp.csv" --capture "../logs/cap-$stamp.txt" ;;
+  2) $PY cable_check.py ;;
+  3) $PY aldl_logger.py --cable --mode raw --capture "../logs/raw-$stamp.txt" ;;
+  4) $PY aldl_logger.py --cable --log "../logs/log-$stamp.csv" --capture "../logs/cap-$stamp.txt" ;;
+  5) $PY aldl_logger.py --port auto --mode pulses ;;
+  6) $PY aldl_logger.py --port auto --mode raw --capture "../logs/raw-$stamp.txt" ;;
+  7) $PY aldl_logger.py --port auto --log "../logs/log-$stamp.csv" --capture "../logs/cap-$stamp.txt" ;;
   *) echo "Not a choice." ;;
 esac
 echo

@@ -1,8 +1,9 @@
 # Fiero ALDL Reader
 
 A DIY live-data reader for the **1988 Pontiac Fiero 2.8 V6** (GM OBD1, 160 baud ALDL
-stream, ECM 1227170). An Arduino decodes the ECM's data line and sends it over USB to a
-Python program that shows a live dashboard and logs to CSV. It's built to diagnose a
+stream, ECM 1227170). It reads the ECM through either a **ready-made USB ALDL cable** or a
+**DIY Arduino interface**, and shows a live dashboard and logs to CSV. It runs on a Mac
+(also Windows and Linux). It's built to diagnose a
 **hunting/stalling idle**: watch RPM, IAC position, MAP, O2 and fuel trims as the idle drops.
 
 > **Status:** the decoder and software are tested against simulated signals only. They have
@@ -10,7 +11,8 @@ Python program that shows a live dashboard and logs to CSV. It's built to diagno
 > [Step 5](#5-fill-in-the-byte-layout).
 
 ```
- Fiero ALDL ──► Arduino (decodes 160 baud) ──USB──► laptop: aldl_logger.py ──► dashboard + CSV
+ Fiero ALDL ──► USB ALDL cable ──────────────────► Mac: aldl_logger.py --cable ──► dashboard + CSV
+ Fiero ALDL ──► Arduino (decodes 160 baud) ──USB─► Mac: aldl_logger.py ─────────► dashboard + CSV
 ```
 
 ## Folder layout
@@ -20,6 +22,9 @@ Python program that shows a live dashboard and logs to CSV. It's built to diagno
 | `arduino/aldl160/` | Arduino sketch (`aldl160.ino`) and the decoder (`aldl_decoder.h`) |
 | `arduino/test/` | PC test for the decoder |
 | `python/aldl_logger.py` | Dashboard, logger, raw-byte viewer, signal checker |
+| `python/aldl160.py` | 160 baud decoding for USB cables (`--cable`) |
+| `python/cable_check.py` | Tests a USB cable and finds the settings that work |
+| `run_mac.command` | Double-click menu for the Mac |
 | `python/definitions/` | Byte layouts: `1227170_template.json` (car), `demo.json` (simulator) |
 | `WIRING.md` | Parts list, circuit, and safety checks |
 
@@ -44,6 +49,35 @@ live data, help fill in the byte layout, and analyse your idle logs. The Claude 
 claude.ai in a browser can't reach USB devices, but you can upload the CSV/TXT files from
 `logs` there for analysis.
 
+## Using a USB ALDL cable (no Arduino)
+
+Buy a cable that says it supports **160 baud on pin E** (e.g. Red Devil River's GM 12-pin
+ALDL to USB cable). Many "ALDL USB" cables only do 8192 baud and won't read a Fiero.
+
+1. Plug the cable into the ALDL socket and the Mac. Key **ON** (engine off is fine).
+2. Double-click `run_mac.command` → **2) Check the cable**. It listens at a few speeds,
+   tries both signal polarities, and reports **SUCCESS** with the settings it saved, or what to
+   try next. If the cable has a switch for the 10k resistor, try it in both positions.
+3. Then use **3) Raw bytes** to see the data and fill in the byte layout (Step 5 below), and
+   **4) Live dashboard + record a log** to diagnose the idle.
+
+From a terminal it's the same:
+
+```bash
+python cable_check.py
+```
+
+```bash
+python aldl_logger.py --cable --mode raw
+```
+
+**How it works and its limits:** the cable is read at 2400 baud, so every ECM pulse arrives
+as one serial byte whose zero bits show how long the pulse was. This was tested with a
+simulated serial chip, not a real cable yet. Cables that pass the signal straight through
+(the usual design) work in simulation. Cables that invert the signal are **experimental**:
+short pulses can be missed. Either way, the check saves everything it received in `logs/`.
+If it doesn't report SUCCESS, send that file to Claude to adapt the decoder to your cable.
+
 ## 1. Try the software with no car
 
 Install [Python 3](https://www.python.org/downloads/), then in the `python` folder:
@@ -58,7 +92,7 @@ python aldl_logger.py --simulate
 
 You'll see a fake hunting idle: RPM falling and the IAC opening to catch it. Ctrl+C stops.
 
-## 2. Build the interface
+## 2. Build the interface (Arduino route only)
 
 Follow **[WIRING.md](WIRING.md)**. It's an Arduino, two resistors and a zener diode.
 Do the multimeter safety checks first.
@@ -153,7 +187,7 @@ You can type these in the Arduino Serial Monitor at 115200 baud:
 ## Tests
 
 ```bash
-cd python && python -m unittest test_aldl_logger -v
+cd python && python -m unittest test_aldl_logger test_cable -v
 ```
 
 ```bash
