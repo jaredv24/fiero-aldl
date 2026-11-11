@@ -91,6 +91,11 @@ def decode(frame, definition):
     return out
 
 
+def column_name(p):
+    """CSV column header for a parameter, with its units: 'Coolant temp (F)'."""
+    return f"{p['name']} ({p['units']})" if p.get("units") else p["name"]
+
+
 def fmt_value(value, p):
     if value is None:
         return "--" if p["offset"] is None else "(short frame)"
@@ -260,7 +265,8 @@ def run_live(src, definition, log_path, capture):
     if log_path:
         logf = open(log_path, "w", newline="", encoding="utf-8")
         writer = csv.writer(logf)
-        writer.writerow(["time", "elapsed_s"] + names + ["raw_hex"])
+        writer.writerow(["time", "elapsed_s"]
+                        + [column_name(p) for p in definition["parameters"]] + ["raw_hex"])
     t0, frames, status, last = time.time(), 0, "", None
     try:
         for line in src.lines():

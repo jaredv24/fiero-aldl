@@ -25,10 +25,11 @@ from collections import deque
 from datetime import datetime
 
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 import aldl160
 import aldl_logger as al
+import analysis
 import cable_check
 
 APP_NAME = "Fiero ALDL"
@@ -151,6 +152,7 @@ class App:
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         root.after(100, self.poll)
         root.after(300, self.redraw_chart)
+        root.after(1000, self.refresh_analysis)
 
     # ------------------------------------------------------------------ UI
 
@@ -220,6 +222,38 @@ class App:
         self.canvas = tk.Canvas(chart_tab, background="white", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True, pady=(8, 0))
 
+        # Analysis
+        an_tab = ttk.Frame(self.nb, padding=10)
+        self.nb.add(an_tab, text="Analysis")
+        top = ttk.Frame(an_tab)
+        top.pack(fill="x")
+        self.an_title = ttk.Label(top, font=("Helvetica", 14, "bold"))
+        self.an_title.pack(side="left")
+        ttk.Button(top, text="Analyze a saved log…", command=self.analyze_log_file).pack(
+            side="right")
+        self.live_btn = ttk.Button(top, text="Back to live", command=self.analysis_back_to_live)
+        ttk.Label(an_tab, foreground="#666", wraplength=950, text=(
+            "Checks readings against typical ranges for GM engines of this era (not factory "
+            "Fiero specs) and explains what's usually behind anything out of the norm. It "
+            "points where to look; it isn't a diagnosis. Checks run only for values that "
+            "are mapped and in real units.")).pack(fill="x", pady=(4, 6))
+        self.an_text = tk.Text(an_tab, wrap="word", font=("Helvetica", 13), padx=12, pady=10,
+                               background="white", relief="flat", cursor="arrow")
+        self.an_text.pack(fill="both", expand=True)
+        for sev, color, label in ((analysis.PROBLEM, "#c0392b", "PROBLEM"),
+                                  (analysis.WATCH, "#b9770e", "WATCH"),
+                                  (analysis.OK, "#1e8449", "OK"),
+                                  (analysis.INFO, "#5d6d7e", "INFO")):
+            self.an_text.tag_configure(sev, foreground=color,
+                                       font=("Helvetica", 13, "bold"))
+        self.an_text.tag_configure("title", font=("Helvetica", 14, "bold"))
+        self.an_text.tag_configure("detail", lmargin1=24, lmargin2=24)
+        self.an_text.tag_configure("hint", lmargin1=24, lmargin2=24, foreground="#444",
+                                   font=("Helvetica", 13, "italic"))
+        self.an_text.configure(state="disabled")
+        self.an_log = None       # (name, findings) when showing a saved log
+        self.an_last = None
+
         # Raw bytes
         raw_tab = ttk.Frame(self.nb, padding=10)
         self.nb.add(raw_tab, text="Raw bytes")
@@ -253,6 +287,7 @@ class App:
 
         # Messages
         log_tab = ttk.Frame(self.nb, padding=10)
+        self.log_tab = log_tab
         self.nb.add(log_tab, text="Messages")
         self.log_text = tk.Text(log_tab, wrap="word", height=10, font=("Menlo", 11),
                                 background="#fafafa")
@@ -399,7 +434,7 @@ class App:
         self.checking = True
         self.check_btn.configure(state="disabled")
         self.connect_btn.configure(state="disabled")
-        self.nb.select(3)
+        self.nb.select(self.log_tab)
         self.log("\n=== Cable check (key must be ON; takes about 30 seconds) ===")
         port_choice = self.port_var.get()
 
@@ -466,9 +501,11 @@ class App:
         cap = open(cap_path, "w", encoding="ascii")
         names = [p["name"] for p in self.definition["parameters"]]
         writer = csv.writer(f)
-        writer.writerow(["time", "elapsed_s"] + names + ["raw_hex"])
+        writer.writerow(["time", "elapsed_s"]
+                        + [al.column_name(p) for p in self.definition["parameters"]]
+                        + ["raw_hex"])
         self.recording = (f, writer, names, cap, csv_path)
-        self.record_btn.configure(text="■ Stop recording")
+        self.record_btn.configure(text="■ Stop")
         self.rec_var.set(f"● Recording to {os.path.basename(csv_path)}")
 
     # ------------------------------------------------------------ data in
@@ -626,6 +663,69 @@ class App:
                 x, y = xy(*pts[-1])
                 c.create_oval(x - 3, y - 3, x + 3, y + 3, fill=CHART_COLORS[i], outline="")
 
+    # ---------------------------------------------------------- analysis
+
+    def params_by_name(self):
+        return {p["name"]: p for p in self.definition["parameters"]}
+
+    def refresh_analysis(self):
+        try:
+            if self.an_log is None:
+                if self.history:
+                    findings = analysis.analyze(list(self.history), self.params_by_name())
+                    title = f"Live: last {analysis.LIVE_WINDOW_S} seconds"
+                else:
+                    findings = [analysis.Finding(
+                        analysis.INFO, "No data yet",
+                        "Connect to the car (or the demo) and checks will appear here.")]
+                    title = "Live"
+                self.show_findings(title, findings)
+        finally:
+            self.root.after(2000, self.refresh_analysis)
+
+    def show_findings(self, title, findings):
+        key = (title, [(f.severity, f.title, f.detail) for f in findings])
+        if key == self.an_last:
+            return
+        self.an_last = key
+        self.an_title.configure(text=title)
+        t = self.an_text
+        t.configure(state="normal")
+        t.delete("1.0", "end")
+        for f in findings:
+            t.insert("end", f" {f.severity.upper()} ", f.severity)
+            t.insert("end", "  " + f.title + "\n", "title")
+            if f.detail:
+                t.insert("end", f.detail + "\n", "detail")
+            if f.hint:
+                t.insert("end", f.hint + "\n", "hint")
+            t.insert("end", "\n")
+        t.configure(state="disabled")
+
+    def analyze_log_file(self, path=None):
+        path = path or filedialog.askopenfilename(
+            title="Choose a log to analyze", initialdir=LOG_DIR,
+            filetypes=[("CSV logs", "*.csv"), ("All files", "*")])
+        if not path:
+            return
+        try:
+            hist, params = analysis.load_log_params(path, fallback=self.params_by_name())
+        except (OSError, ValueError, KeyError) as e:
+            messagebox.showerror(APP_NAME, f"Couldn't read that log:\n{e}")
+            return
+        findings = analysis.analyze(hist, params, window=None)
+        secs = hist[-1][0] - hist[0][0] if hist else 0
+        self.an_log = path
+        self.an_last = None
+        self.show_findings(f"Log: {os.path.basename(path)}  ({secs:.0f} s)", findings)
+        self.live_btn.pack(side="right", padx=6)
+        self.nb.select(self.an_text.master)
+
+    def analysis_back_to_live(self):
+        self.an_log = None
+        self.an_last = None
+        self.live_btn.pack_forget()
+
     # ---------------------------------------------------------- raw bytes
 
     def update_raw(self, frame):
@@ -717,8 +817,12 @@ def self_test(root, app, seconds=4.0):
         with open(csv_path, encoding="utf-8") as f:
             rows = len(f.read().strip().splitlines()) - 1
         app._draw_chart()
-        result["ok"] = app.frames >= 3 and shown not in ("--", "") and rows >= 2
+        app.analyze_log_file(csv_path)
+        analysed = app.an_title.cget("text").startswith("Log:") and app.an_last
+        result["ok"] = (app.frames >= 3 and shown not in ("--", "") and rows >= 2
+                        and bool(analysed))
         print(f"self-test: frames={app.frames} rpm_tile={shown} logged_rows={rows} "
+              f"log_analysis={'yes' if analysed else 'no'} "
               f"-> {'OK' if result['ok'] else 'FAILED'}")
         app.on_close()
 

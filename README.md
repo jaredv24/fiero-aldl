@@ -23,6 +23,11 @@ stream, ECM 1227170). It reads the ECM through either a **ready-made USB ALDL ca
 - **Check cable…** finds the settings your cable needs (key ON) and saves them
 - **Dashboard:** big live readouts for RPM, IAC, MAP, O2, trims, coolant and more
 - **Chart:** the last 60 seconds of any three values, stacked, for watching the idle hunt
+- **Analysis:** flags readings out of the normal range in plain language (idle hunting,
+  RPM near stall, IAC shut or maxed out, low vacuum, TPS off, lean/rich O2, fuel trims,
+  charging voltage, a dead coolant sensor) with what usually causes each one. Works live
+  (last 30 s) or on a saved log. Limits are typical GM ranges of the era, not factory Fiero
+  specs, so treat findings as where to look, not a diagnosis.
 - **Raw bytes:** every byte the ECM sends; select one, pick what it is (RPM, TPS, …) and
   click **Assign** to build the byte layout
 - **Record:** saves a CSV log plus a raw capture you can send to Claude
@@ -52,6 +57,7 @@ To run it from source instead: `python fiero_app.py` in the `python` folder
 | `arduino/test/` | PC test for the decoder |
 | `python/fiero_app.py` | The desktop app (window, dashboard, chart, raw bytes, recording) |
 | `.github/workflows/build-mac-app.yml` | Builds `Fiero ALDL.app` on GitHub's Macs |
+| `python/analysis.py` | The checks behind the Analysis tab |
 | `python/aldl_logger.py` | Command-line dashboard, logger, raw-byte viewer, signal checker |
 | `python/aldl160.py` | 160 baud decoding for USB cables (`--cable`) |
 | `python/cable_check.py` | Tests a USB cable and finds the settings that work |
@@ -218,7 +224,7 @@ You can type these in the Arduino Serial Monitor at 115200 baud:
 ## Tests
 
 ```bash
-cd python && python -m unittest test_aldl_logger test_cable -v
+cd python && python -m unittest test_aldl_logger test_cable test_analysis -v
 ```
 
 ```bash

@@ -36,7 +36,7 @@ jobs:
 
       - name: Unit tests
         working-directory: python
-        run: python -m unittest test_aldl_logger test_cable -v
+        run: python -m unittest test_aldl_logger test_cable test_analysis -v
 
       - name: App self-test (from source)
         working-directory: python
