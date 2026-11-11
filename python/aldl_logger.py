@@ -7,6 +7,7 @@ live dashboard, logs them to CSV, or helps you work out which byte is which.
 Examples:
     python aldl_logger.py --simulate                 # try it with no car
     python aldl_logger.py --list-ports               # find your Arduino
+    python aldl_logger.py --port auto                # find it automatically
     python aldl_logger.py --port COM3 --mode pulses  # check the signal
     python aldl_logger.py --port COM3 --mode raw     # see raw bytes change
     python aldl_logger.py --port COM3 --log idle.csv # dashboard + CSV log
@@ -97,6 +98,26 @@ def fmt_value(value, p):
 # --------------------------------------------------------------------------
 # Data sources
 # --------------------------------------------------------------------------
+
+def find_port():
+    """Pick the Arduino's serial port automatically (Mac, Windows or Linux)."""
+    try:
+        from serial.tools import list_ports
+    except ImportError:
+        sys.exit("pyserial is not installed. Run:  pip install pyserial")
+    ports = list(list_ports.comports())
+    hints = ("arduino", "usbmodem", "usbserial", "wchusbserial", "ch340", "ttyacm", "ttyusb")
+    found = [p for p in ports
+             if any(h in (p.device + " " + (p.description or "")).lower() for h in hints)]
+    # On a Mac, /dev/cu.* is the right one to open (/dev/tty.* can hang).
+    found = [p for p in found if not p.device.startswith("/dev/tty.")] or found
+    if len(found) == 1:
+        return found[0].device
+    if not found:
+        sys.exit("No Arduino found. Is it plugged in? Run with --list-ports to see all ports.")
+    sys.exit("More than one possible port:\n  " + "\n  ".join(p.device for p in found)
+             + "\nPick one with --port.")
+
 
 class SerialSource:
     def __init__(self, port, baud=115200):
@@ -364,7 +385,8 @@ def print_pulse_report(widths):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--port", help="serial port of the Arduino, e.g. COM3 or /dev/ttyUSB0")
+    ap.add_argument("--port", help="serial port of the Arduino, e.g. COM3, /dev/cu.usbmodem1101, "
+                                   "or 'auto' to find it")
     ap.add_argument("--simulate", action="store_true", help="use a fake ECM (no hardware)")
     ap.add_argument("--replay", metavar="FILE", help="play back a --capture file")
     ap.add_argument("--list-ports", action="store_true", help="list serial ports and exit")
@@ -395,7 +417,9 @@ def main(argv=None):
         src = ReplaySource(args.replay)
         default_def = DEFAULT_DEF
     elif args.port:
-        src = SerialSource(args.port)
+        port = find_port() if args.port == "auto" else args.port
+        print(f"Using serial port {port}")
+        src = SerialSource(port)
         default_def = DEFAULT_DEF
     else:
         ap.error("give --port, --simulate or --replay (use --list-ports to find the port)")

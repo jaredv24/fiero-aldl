@@ -23,6 +23,27 @@ Python program that shows a live dashboard and logs to CSV. It's built to diagno
 | `python/definitions/` | Byte layouts: `1227170_template.json` (car), `demo.json` (simulator) |
 | `WIRING.md` | Parts list, circuit, and safety checks |
 
+## On a Mac (easiest)
+
+Double-click **`run_mac.command`** and pick from the menu. The first run sets itself up
+(needs internet), and it finds the Arduino's port automatically. Logs go in the `logs` folder.
+
+- If macOS says it can't open the file, right-click it → **Open** → **Open**.
+- Python 3: if it isn't installed, macOS offers to install it the first time, or get it
+  from [python.org](https://www.python.org/downloads/).
+- Official Arduino boards need no driver. Some cheap clone boards use a CH340 USB chip that
+  may need a driver from the chip maker.
+- Ports on a Mac look like `/dev/cu.usbmodem1101` or `/dev/cu.usbserial-110`. Use the
+  `/dev/cu.` one, not `/dev/tty.`. `--port auto` does this for you.
+
+### Using it with Claude
+
+Install the **Claude desktop app** and use **Claude Code** in it, opened on this `fiero-aldl`
+folder, with the Arduino plugged into the Mac. Claude can then run the logger itself, read the
+live data, help fill in the byte layout, and analyse your idle logs. The Claude phone app and
+claude.ai in a browser can't reach USB devices, but you can upload the CSV/TXT files from
+`logs` there for analysis.
+
 ## 1. Try the software with no car
 
 Install [Python 3](https://www.python.org/downloads/), then in the `python` folder:
@@ -58,17 +79,17 @@ python aldl_logger.py --list-ports
 ## 4. Check the signal (key on)
 
 ```bash
-python aldl_logger.py --port COM3 --mode pulses
+python aldl_logger.py --port auto --mode pulses
 ```
 
-Use your port in place of `COM3` (on a Mac it looks like `/dev/cu.usbserial-...`).
+`--port auto` finds the Arduino. If it picks wrong, give the port instead (e.g. `COM3` on Windows, `/dev/cu.usbmodem1101` on a Mac).
 You want each line level to form two tight groups, with a low plus the following high
 adding up to about 6250 µs (one bit at 160 baud). See WIRING.md if you see nothing.
 
 Then look at raw frames:
 
 ```bash
-python aldl_logger.py --port COM3 --mode raw --capture first_try.txt
+python aldl_logger.py --port auto --mode raw --capture first_try.txt
 ```
 
 If no frames show up, try again with `--invert` (the signal's active level is the other
@@ -101,7 +122,7 @@ Note that the published definition is still needed to get accurate units.
 ## 6. Diagnose the idle
 
 ```bash
-python aldl_logger.py --port COM3 --log idle_cold.csv --capture idle_cold.txt
+python aldl_logger.py --port auto --log idle_cold.csv --capture idle_cold.txt
 ```
 
 Let it hunt and stall a few times, then do the same warm. Open the CSV in Excel or Google
