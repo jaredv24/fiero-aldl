@@ -61,10 +61,11 @@ and the Analysis findings. The answer streams in; ask follow-ups below it.
    download the zip for your Mac: **apple-silicon** for M1 and newer, **intel** for older
    Macs ( → About This Mac shows which you have).
 2. Double-click the zip, then drag **Fiero ALDL** into **Applications**.
-3. The app isn't signed by Apple, so the first time macOS blocks it. Double-click it, click
-   **Done** on the warning, then open **System Settings → Privacy & Security**, scroll down
-   and click **Open Anyway** next to "Fiero ALDL" (on older macOS: right-click the app →
-   **Open** → **Open**). After that it opens normally.
+3. The app isn't signed by Apple, so macOS blocks it the first time. The surest fix: open
+   **Terminal** and run
+   `xattr -dr com.apple.quarantine "/Applications/Fiero ALDL.app"`, then open the app normally.
+   (Alternatively: double-click it, click **Done**, then **System Settings → Privacy & Security →
+   Open Anyway**. If macOS keeps saying it's verifying, use the Terminal command.)
 
 To run it from source instead: `python fiero_app.py` in the `python` folder
 (needs `pip install -r requirements.txt`).

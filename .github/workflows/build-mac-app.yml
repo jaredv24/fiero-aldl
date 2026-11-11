@@ -59,6 +59,12 @@ jobs:
           --copy-metadata keyring
           fiero_app.py
 
+      - name: Sign the app consistently (ad-hoc) and verify
+        run: |
+          xattr -cr "python/dist/Fiero ALDL.app"
+          codesign --force --deep --sign - "python/dist/Fiero ALDL.app"
+          codesign --verify --deep --strict --verbose=2 "python/dist/Fiero ALDL.app"
+
       - name: App self-test (built app)
         run: '"python/dist/Fiero ALDL.app/Contents/MacOS/Fiero ALDL" --self-test'
 
@@ -95,7 +101,9 @@ jobs:
             - `Fiero-ALDL-apple-silicon.zip`: M1 and newer
             - `Fiero-ALDL-intel.zip`: older Intel Macs
 
-            Unzip, drag **Fiero ALDL** to Applications. The app isn't signed by Apple: the first
-            time, open it, click Done, then System Settings > Privacy & Security > **Open Anyway**.
+            Unzip and drag **Fiero ALDL** to Applications. The app isn't signed by Apple, so
+            macOS blocks it at first. Open Terminal and run this once, then open the app normally:
+
+                xattr -dr com.apple.quarantine "/Applications/Fiero ALDL.app"
 
             Not yet tested on a real car; readings follow GM's A29 specification. See the README.
