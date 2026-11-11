@@ -1,19 +1,19 @@
 # Fiero ALDL Reader
 
-A DIY live-data reader for the **1988 Pontiac Fiero 2.8 V6** (GM OBD1, 160 baud ALDL
-stream, ECM 1227170). It reads the ECM through either a **ready-made USB ALDL cable** or a
-**DIY Arduino interface**, and shows a live dashboard and logs to CSV. It runs on a Mac
-(also Windows and Linux). It's built to diagnose a
-**hunting/stalling idle**: watch RPM, IAC position, MAP, O2 and fuel trims as the idle drops.
+A Mac diagnostic app for your cars. It reads live engine data from:
 
-> **Status:** the Fiero V6 byte layout and signal timing come from GM's own data stream
-> specification (A29), see [Step 5](#5-the-byte-layout-built-in). The software is tested
-> against simulated signals built to that spec; it has not been run on a real car yet.
+- **Any 1996+ car (OBD-II)** through an ELM327-compatible USB adapter such as the **OBDLink SX**,
+  with researched normal values for each car (built in: **2002 Pontiac Grand Prix GTP 3.8
+  supercharged**; add others with Claude).
+- The **1985-88 Pontiac Fiero 2.8 V6** (GM OBD1, 160 baud ALDL, ECM 1227170) through a USB ALDL
+  cable or a DIY Arduino interface.
 
-```
- Fiero ALDL ──► USB ALDL cable ──────────────────► Mac: aldl_logger.py --cable ──► dashboard + CSV
- Fiero ALDL ──► Arduino (decodes 160 baud) ──USB─► Mac: aldl_logger.py ─────────► dashboard + CSV
-```
+It shows a live dashboard and chart, reads and clears trouble codes, checks emissions readiness,
+runs guided tests, flags readings outside the car's normal range, logs to CSV, and can ask Claude
+for a diagnosis.
+
+> **Status:** tested against simulated cars built to the GM and SAE specifications (including the
+> real OBD driver talking to a simulated adapter). Not yet tested on a real car.
 
 ## The Mac app
 
@@ -43,6 +43,23 @@ stream, ECM 1227170). It reads the ECM through either a **ready-made USB ALDL ca
 Your logs, byte layout (`my_layout.json`) and cable settings are kept in
 **Documents → Fiero ALDL**.
 
+### OBD-II cars (Grand Prix and other 1996+ cars)
+
+1. Plug the **OBDLink SX** into the car's diagnostic port (under the dash) and into the Mac.
+2. Under **Vehicles…**, pick your car (or research it with Claude), then choose **OBD-II adapter
+   (OBDLink)** and click **Connect** with the key ON.
+3. The dashboard fills with whatever readings the car supports, each with its normal range.
+
+The **Codes** tab reads stored, pending and permanent trouble codes (with descriptions and this
+car's known-problem hints), the freeze frame, the VIN and the **readiness monitors** with an
+emissions-inspection verdict. **Clear codes** asks for confirmation first, because clearing also
+resets the readiness monitors.
+
+OBD-II guided tests: key-on baseline, throttle sweep, warm-up and thermostat, idle quality, stall
+catcher, **2500 rpm hold (vacuum leak vs fuel delivery, per bank)**, **catalyst check** (front vs
+rear O2), charging, and road test. Try them all with **Demo: Grand Prix**, a simulated GTP with a
+small vacuum leak and stored P0171/P0174.
+
 ### Vehicles and vehicle profiles
 
 A **vehicle profile** is a file with one car's researched normal values (each with its sources
@@ -59,8 +76,6 @@ Prix GTP 3.8 supercharged. To add another car:
 Every profile is checked before it's used: values must be numbers in a sensible order, every
 non-estimate needs source links, and data-code formulas may only use simple arithmetic.
 Imported profiles are kept in **Documents → Fiero ALDL → vehicles**.
-
-Live OBD-II connection (for the Grand Prix and other 1996+ cars) is the next part being built.
 
 ### Guided tests
 
@@ -141,6 +156,9 @@ published with GitHub Pages at **https://jaredv24.github.io/fiero-aldl/** by
 | `python/guided_tests.py` | The guided tests and their pass/watch/fail rules |
 | `python/profiles/` | Built-in vehicle profiles (Fiero 2.8 V6, 2002 Grand Prix GTP) |
 | `python/vehicle_profile.py` | Vehicle profile format, checker, import and Claude research |
+| `python/obd.py`, `python/elm327.py` | OBD-II decoding and the ELM327/OBDLink adapter driver |
+| `python/obd_source.py`, `python/elm_sim.py` | OBD-II live data source; simulated Grand Prix adapter |
+| `python/obd_analysis.py`, `python/obd_tests.py` | OBD-II checks and guided tests |
 | `python/claude_assistant.py` | The Ask Claude tab's data summary and Claude API calls |
 | `python/aldl_logger.py` | Command-line dashboard, logger, raw-byte viewer, signal checker |
 | `python/aldl160.py` | 160 baud decoding for USB cables (`--cable`) |
@@ -327,7 +345,7 @@ You can type these in the Arduino Serial Monitor at 115200 baud:
 ## Tests
 
 ```bash
-cd python && python -m unittest test_aldl_logger test_cable test_analysis test_claude_assistant test_derived test_guided_tests test_vehicle_profile -v
+cd python && python -m unittest test_aldl_logger test_cable test_analysis test_claude_assistant test_derived test_guided_tests test_vehicle_profile test_obd -v
 ```
 
 ```bash

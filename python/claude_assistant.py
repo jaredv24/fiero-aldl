@@ -60,6 +60,48 @@ which confidence level you're relying on:
 """ + "\n".join(normals.summary_lines()) + "\n"
 
 
+OBD_PROMPT = """\
+You are helping the owner of {car} diagnose their engine from live OBD-II data read through \
+their own app and an ELM327 adapter. They are a hands-on owner, not a professional technician.
+
+Notes on the values: fuel trims are percent (0 = no correction; positive = the computer is \
+adding fuel because it sees lean, negative = removing fuel); total trim = short + long term. \
+"B1"/"B2" are the engine's banks. O2 sensor 1 is upstream (switches 0.1-0.9 V in closed loop), \
+sensor 2 is downstream of the catalyst (should stay fairly steady with a good catalyst). MAF is \
+grams per second. Temperatures are F, speed mph. Trouble codes come from the car's computer.
+
+How to answer:
+- Base your reasoning on the numbers given, quote the readings behind each point, and say when \
+the data can't settle something.
+- Rank likely causes, then give checks in a sensible order (cheap and quick first), saying what \
+result would confirm or rule out each cause.
+- Mention safety where it matters. Be concise with short headings or lists.
+"""
+
+
+def system_prompt_for(profile, obd_mode):
+    """Instructions for Claude for the car being diagnosed."""
+    if not obd_mode:
+        return SYSTEM_PROMPT
+    car = (profile or {}).get("vehicle", {}).get("name") or "an OBD-II car (1996 or newer)"
+    text = OBD_PROMPT.format(car=car)
+    if profile:
+        text += "\nResearched normal values for this car (with how solid each is):\n"
+        for n in profile["normals"].values():
+            rng = (f"{n['low']:g}-{n['high']:g}" if n.get("low") is not None and n.get("high") is not None
+                   else f"{n.get('low') if n.get('low') is not None else n.get('high')}")
+            text += (f"- {n['label']}: {rng} {n['unit']} ({n['condition']}) [{n['confidence']}] "
+                     f"{n['note']}\n")
+        if profile.get("known_issues"):
+            text += "\nKnown problems for this car:\n"
+            for k in profile["known_issues"]:
+                text += (f"- {k['title']}: {k.get('symptoms', '')} Data: {k.get('what_data_shows', '')} "
+                         f"Check: {k.get('checks', '')}\n")
+    else:
+        text += "\nNo researched profile for this car: use general OBD-II knowledge and say so.\n"
+    return text
+
+
 def _fmt(v, dec=2):
     if v is None:
         return ""
@@ -126,7 +168,10 @@ def build_data_summary(history, params, title, findings=None, calculated=None,
     return "\n".join(lines)
 
 
-def first_question(summary):
+def first_question(summary, car=None):
+    if car:
+        return (f"{summary}\n\nThis is my {car}. Based on this data, what do you see, what are the "
+                "most likely causes of any problems, and what should I check first?")
     return (f"{summary}\n\n"
             "My Fiero's idle hunts (it drops toward stalling, recovers, and sometimes dies), "
             "cold and warm. Based on this data, what do you see, what are the most likely "
@@ -172,11 +217,12 @@ def delete_api_key():
 class Conversation:
     """One chat with Claude about the data. Not thread-safe: one ask() at a time."""
 
-    def __init__(self, api_key=None, client=None):
+    def __init__(self, api_key=None, client=None, system=None):
         if client is None:
             import anthropic
             client = anthropic.Anthropic(api_key=api_key)
         self.client = client
+        self.system = system or SYSTEM_PROMPT
         self.messages = []
         self.total_cost = 0.0
 
@@ -190,7 +236,7 @@ class Conversation:
             with self.client.beta.messages.stream(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
-                system=SYSTEM_PROMPT,
+                system=self.system,
                 messages=self.messages,
                 output_config={"effort": EFFORT},
                 cache_control={"type": "ephemeral"},

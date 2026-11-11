@@ -35,6 +35,11 @@ import derived
 import guided_tests
 import normals
 import vehicle_profile
+import elm_sim
+import obd_analysis
+import obd_source
+import obd_tests
+import obd
 import cable_check
 
 APP_NAME = "Fiero ALDL"
@@ -52,7 +57,9 @@ CABLE_SETTINGS = os.path.join(DATA_DIR, "cable_settings.json")
 TEMPLATE_DEF = os.path.join(RES_DIR, "definitions", "1227170_fiero_v6.json")
 DEMO_DEF = TEMPLATE_DEF
 
-SRC_DEMO, SRC_CABLE, SRC_ARDUINO = "Demo (no car)", "USB ALDL cable", "Arduino interface"
+SRC_DEMO, SRC_CABLE, SRC_ARDUINO = "Demo: Fiero (no car)", "USB ALDL cable (Fiero)", "Arduino interface (Fiero)"
+SRC_DEMO_OBD, SRC_OBD = "Demo: Grand Prix (no car)", "OBD-II adapter (OBDLink)"
+SOURCES = [SRC_DEMO, SRC_DEMO_OBD, SRC_OBD, SRC_CABLE, SRC_ARDUINO]
 AUTO_PORT = "Automatic"
 CHART_SECONDS = 60
 CHART_COLORS = ("#2a6fdb", "#d1495b", "#2e9e5b")
@@ -212,8 +219,8 @@ class App:
 
         ttk.Label(bar, text="Connect to:").pack(side="left")
         self.source_var = tk.StringVar(value=SRC_DEMO)
-        src = ttk.Combobox(bar, textvariable=self.source_var, state="readonly", width=17,
-                           values=[SRC_DEMO, SRC_CABLE, SRC_ARDUINO])
+        src = ttk.Combobox(bar, textvariable=self.source_var, state="readonly", width=23,
+                           values=SOURCES)
         src.pack(side="left", padx=(4, 10))
         src.bind("<<ComboboxSelected>>", lambda e: self.on_source_change())
 
@@ -244,11 +251,13 @@ class App:
         ttk.Label(adv, textvariable=self.hint_var, foreground=self.c["muted"]).pack(side="left")
         self.invert_var = tk.BooleanVar(value=False)
         self.lsb_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(adv, text="LSB first", variable=self.lsb_var).pack(side="right")
-        ttk.Checkbutton(adv, text="Invert signal", variable=self.invert_var).pack(
-            side="right", padx=(0, 10))
-        ttk.Label(adv, text="Only if the data looks wrong:", foreground=self.c["muted"]).pack(
-            side="right", padx=(0, 8))
+        # Signal options only matter for the Fiero's ALDL cable and Arduino.
+        self.signal_opts = ttk.Frame(adv)
+        ttk.Label(self.signal_opts, text="Only if the data looks wrong:",
+                  foreground=self.c["muted"]).pack(side="left", padx=(0, 8))
+        ttk.Checkbutton(self.signal_opts, text="Invert signal", variable=self.invert_var).pack(
+            side="left", padx=(0, 10))
+        ttk.Checkbutton(self.signal_opts, text="LSB first", variable=self.lsb_var).pack(side="left")
 
     def _build_tabs(self):
         self.nb = ttk.Notebook(self.root)
@@ -289,11 +298,8 @@ class App:
         ttk.Button(top, text="Analyze a saved log…", command=self.analyze_log_file).pack(
             side="right")
         self.live_btn = ttk.Button(top, text="Back to live", command=self.analysis_back_to_live)
-        ttk.Label(an_tab, foreground=self.c["muted"], wraplength=950, text=(
-            "Checks readings against researched normal values for the Fiero 2.8 V6 (GM chart "
-            "values where available, otherwise GM figures for this era or Fiero owner "
-            "reports) and explains what's usually behind anything out of the norm. It points "
-            "where to look; it isn't a diagnosis.")).pack(fill="x", pady=(4, 6))
+        self.an_intro = ttk.Label(an_tab, foreground=self.c["muted"], wraplength=950)
+        self.an_intro.pack(fill="x", pady=(4, 6))
         self.an_text = tk.Text(an_tab, wrap="word", foreground=INK, insertbackground=INK, font=("Helvetica", 13), padx=12, pady=10,
                                background="white", relief="flat", cursor="arrow")
         self.an_text.pack(fill="both", expand=True)
@@ -313,6 +319,7 @@ class App:
         self.an_log = None       # (name, findings) when showing a saved log
         self.an_last = None
 
+        self._build_codes_tab()
         self._build_tests_tab()
         self._build_claude_tab()
 
@@ -373,10 +380,32 @@ class App:
     # ------------------------------------------------------------ settings
 
     def is_demo(self):
-        return self.source_var.get() == SRC_DEMO
+        return self.source_var.get() in (SRC_DEMO, SRC_DEMO_OBD)
+
+    def is_obd(self):
+        return self.source_var.get() in (SRC_DEMO_OBD, SRC_OBD)
+
+    def vehicle_profile(self):
+        """The profile that goes with the current source (None: generic OBD-II)."""
+        items = vehicle_profile.list_profiles(VEHICLES_DIR)
+        if self.source_var.get() == SRC_DEMO_OBD:
+            return next((p for _, p in items if "Grand Prix GTP" in p["vehicle"]["name"]), None)
+        if self.is_obd():
+            name = self.active_vehicle_name()
+            prof = next((p for _, p in items if p["vehicle"]["name"] == name), None)
+            return prof if prof and prof["connection"]["type"] == "obd2" else None
+        return next((p for _, p in items if p["connection"]["type"] == "aldl"), None)
 
     def load_current_definition(self):
-        path = DEMO_DEF if self.is_demo() else LAYOUT_PATH
+        if self.is_obd():
+            # The car's readings arrive from the adapter after connecting ("M" line).
+            self.definition = {"type": "obd2", "name": "OBD-II", "parameters": [],
+                               "trouble_codes": [], "flags": []}
+            self.build_tiles()
+            for v, cb in self.chart_vars:
+                cb.configure(values=[])
+            return
+        path = DEMO_DEF if self.source_var.get() == SRC_DEMO else LAYOUT_PATH
         try:
             self.definition = al.load_definition(path)
         except (OSError, ValueError) as e:
@@ -395,18 +424,37 @@ class App:
         self.refresh_btn.configure(state="disabled" if demo else "normal")
         self.check_btn.configure(
             state="normal" if self.source_var.get() == SRC_CABLE else "disabled")
-        state = "disabled" if demo else "normal"
+        state = "disabled" if demo or self.is_obd() else "normal"
         self.assign_btn.configure(state=state)
         self.clear_btn.configure(state=state)
         self.assign_note.configure(
             text="(the demo uses a fixed layout)" if demo else "")
         self.hint_var.set({
-            SRC_DEMO: "Demo: a fake ECM with a hunting idle, no hardware needed.",
+            SRC_DEMO_OBD: "Demo: a simulated 2002 Grand Prix GTP with a small vacuum leak.",
+            SRC_OBD: ("OBD-II: plug the OBDLink into the car (under the dash), key ON, then "
+                      "Connect. Pick your car under Vehicles… for its normal values."),
+            SRC_DEMO: "Demo: a fake Fiero ECM with a hunting idle, no hardware needed.",
             SRC_CABLE: ("USB cable: turn its 10k switch ON (ALDL mode), key ON, run "
                         "'Check cable…' once, then Connect."),
             SRC_ARDUINO: "Arduino: plug in the interface, key ON, then Connect.",
         }[self.source_var.get()])
+        self.claude_conv = None                  # vehicle may have changed
+        if self.source_var.get() in (SRC_CABLE, SRC_ARDUINO):
+            self.signal_opts.pack(side="right")
+        else:
+            self.signal_opts.pack_forget()
+        prof = self.vehicle_profile()
+        car = (prof or {}).get("vehicle", {}).get("name") or "OBD-II car (no profile chosen)"
+        self.vehicle_var.set(car)
+        self.an_intro.configure(text=(
+            f"Checks readings against researched normal values for the {car} (each with its "
+            "source; see Vehicles…) and explains what's usually behind anything out of the "
+            "norm. It points where to look; it isn't a diagnosis." if prof else
+            "No vehicle profile chosen, so general OBD-II rules of thumb are used. Pick or "
+            "research your car under Vehicles… for its own normal values."))
         self.load_current_definition()
+        if hasattr(self, "test_tree"):
+            self.populate_tests()
 
     def refresh_ports(self):
         ports = list_serial_ports()
@@ -432,6 +480,16 @@ class App:
         invert, lsb = self.invert_var.get(), self.lsb_var.get()
         if source == SRC_DEMO:
             return al.SimSource
+        if source in (SRC_DEMO_OBD, SRC_OBD):
+            profile = self.vehicle_profile()
+            if source == SRC_DEMO_OBD:
+                return lambda: obd_source.ObdSource(elm_sim.SimElm(), profile)
+
+            def make_obd():
+                port = self.chosen_port()
+                self.q.put(("log", f"Opening OBD-II adapter on {port}\n"))
+                return obd_source.ObdSource(obd_source.open_adapter(port), profile)
+            return make_obd
         if source == SRC_CABLE:
             settings = self.cable_settings()
             if not settings:
@@ -598,6 +656,8 @@ class App:
                     pass
                 elif kind == "check_done":
                     self.check_finished(payload)
+                elif kind == "obd_result":
+                    self.codes_result(*payload)
                 elif kind == "claude_text":
                     self.claude_stream_text(payload)
                 elif kind == "claude_done":
@@ -621,16 +681,45 @@ class App:
             self.log(payload)
         elif kind == "D":
             self.handle_frame(payload)
+        elif kind == "M":
+            self.set_obd_definition(payload)
+        elif kind == "J":
+            vals = dict(payload.get("values", {}))
+            codes = [tuple(c) for c in payload.get("codes", [])]
+            flags = payload.get("flags", {})
+            vals["_codes"], vals["_flags"] = codes, flags
+            self._ingest(vals, codes, flags, None)
+
+    def set_obd_definition(self, d):
+        for p in d["parameters"]:
+            p.setdefault("decimals", 1)
+            p.setdefault("offset", 0)
+            p.setdefault("units", p.get("unit", ""))
+        self.definition = d
+        self.build_tiles()
+        names = [p["name"] for p in d["parameters"]]
+        for v, cb in self.chart_vars:
+            cb.configure(values=names)
+        defaults = [n for n in ("Engine RPM", "Long trim B1", "O2 B1S1 (upstream)") if n in names]
+        for (v, _cb), name in zip(self.chart_vars, defaults):
+            v.set(name)
+        self.log(f"{d['name']}: {len(names)} readings available.")
 
     def handle_frame(self, frame):
-        self.frames += 1
-        elapsed = time.time() - self.t0
         rows = al.decode(frame, self.definition)
         values = {name: value for name, value, _, _ in rows}
         codes, flags = al.decode_status(frame, self.definition)
         if self.definition.get("trouble_codes") or flags:
             values["_codes"], values["_flags"] = codes, flags
+        self._ingest(values, codes, flags, frame)
+
+    def _ingest(self, values, codes, flags, frame):
+        """One sample from any source: update tiles, history, tests, recording."""
+        self.frames += 1
+        elapsed = time.time() - self.t0
         self.show_ecm_status(frame, codes, flags)
+        params = {p["name"]: p for p in self.definition["parameters"]}
+        rows = [(n, values.get(n), p.get("units", ""), p) for n, p in params.items()]
         for name, value, units, p in rows:
             tile = self.tiles.get(name)
             if not tile:
@@ -643,32 +732,38 @@ class App:
         self.history.append((elapsed, values))
         while self.history and elapsed - self.history[0][0] > CHART_SECONDS:
             self.history.popleft()
-        self.update_raw(frame)
+        if frame is not None:
+            self.update_raw(frame)
         if self.runner is not None and not self.runner.done:
             self.runner.feed(elapsed, values)
         if self.recording:
             _, writer, names, _, _ = self.recording
             writer.writerow([datetime.now().isoformat(timespec="milliseconds"), f"{elapsed:.2f}"]
                             + ["" if values.get(n) is None else f"{values[n]:.3f}" for n in names]
-                            + [al.codes_text(codes), al.flags_text(flags), frame.hex().upper()])
+                            + [al.codes_text(codes), al.flags_text(flags),
+                               frame.hex().upper() if frame is not None else ""])
             self.recording[0].flush()
-        self.status_var.set(f"Connected: {self.source_var.get()}   frames: {self.frames}   "
-                            f"frame length: {len(frame)} bytes")
-        self.last_frame = frame
+        what = (f"frame length: {len(frame)} bytes" if frame is not None
+                else self.definition.get("protocol", ""))
+        self.status_var.set(f"Connected: {self.source_var.get()}   readings: {self.frames}   {what}")
+        if frame is not None:
+            self.last_frame = frame
 
     # -------------------------------------------------------- dashboard
 
     def show_ecm_status(self, frame, codes, flags):
         parts = []
         exp = self.definition.get("expected_length")
-        if exp and len(frame) != exp:
+        if frame is not None and exp and len(frame) != exp:
             self.ecm_status.configure(foreground=self.c["bad"], text=(
                 f"Frames are {len(frame)} bytes but this ECM sends {exp}: the readings below "
                 "are probably wrong. Re-run Check cable… or try 'Invert signal'."))
             return
-        if self.definition.get("trouble_codes"):
+        if self.definition.get("trouble_codes") or self.definition.get("type") == "obd2":
             parts.append("Trouble codes: " + (", ".join(f"{c} ({t})" for c, t in codes)
                                               if codes else "none"))
+        if flags.get("Check engine light on"):
+            parts.append("Check engine light ON")
         if "Closed loop" in flags:
             parts.append("Closed loop" if flags["Closed loop"] else "Open loop")
         for name in ("Park/Neutral", "A/C clutch on", "Diagnostic (shorted) mode"):
@@ -677,12 +772,24 @@ class App:
         self.ecm_status.configure(foreground=self.c["bad"] if codes else self.c["good"],
                                   text="   •   ".join(parts))
 
+    def tile_normal(self, p):
+        """'normal 4–6 g/s · warm idle' for a dashboard tile, from the vehicle's profile."""
+        if self.definition.get("type") == "obd2":
+            n = obd_analysis.normal(self.vehicle_profile(), p.get("signal"))
+            if n and (n.get("low") is not None or n.get("high") is not None):
+                return f"normal {vehicle_profile_range(n)} · {n.get('short', '')}"
+            return None
+        nkey = normals.DASHBOARD.get(p["name"])
+        if nkey and p.get("offset") is not None:
+            return f"normal {normals.range_text(nkey)} · {normals.get(nkey).get('short', '')}"
+        return None
+
     def build_tiles(self):
         for w in self.tile_frame.winfo_children():
             w.destroy()
         self.tiles = {}
         params = [p for p in self.definition["parameters"] if p.get("range")]
-        cols = 4
+        cols = 5 if len(params) > 13 else 4
         for i, p in enumerate(params):
             box = ttk.LabelFrame(self.tile_frame, text=p["name"], padding=(10, 4))
             box.grid(row=i // cols, column=i % cols, sticky="nsew", padx=6, pady=6)
@@ -694,12 +801,10 @@ class App:
                 side="left", anchor="s", pady=(0, 6))
             bar = ttk.Progressbar(box, maximum=1000, mode="determinate")
             bar.pack(fill="x", pady=(4, 2))
-            nkey = normals.DASHBOARD.get(p["name"])
-            if nkey and p["offset"] is not None:
-                nv = normals.get(nkey)
+            ntext = self.tile_normal(p)
+            if ntext:
                 ttk.Label(box, foreground=self.c["muted"], font=("Helvetica", 11),
-                          text=f"normal {normals.range_text(nkey)} · {nv.get('short', '')}"
-                          ).pack(anchor="w")
+                          text=ntext).pack(anchor="w")
             if p["offset"] is None:
                 ttk.Label(box, text="not mapped yet", foreground=self.c["muted"]).pack(anchor="w")
             self.tiles[p["name"]] = {"value": value, "bar": bar}
@@ -784,7 +889,10 @@ class App:
             if self.an_log is None:
                 if self.history:
                     hist = list(self.history)
-                    findings = analysis.analyze(hist, self.params_by_name())
+                    if self.definition.get("type") == "obd2":
+                        findings = obd_analysis.analyze(hist, self.vehicle_profile())
+                    else:
+                        findings = analysis.analyze(hist, self.params_by_name())
                     self.an_calc = derived.calculated(hist, self.baseline_baro())
                     title = f"Live: last {analysis.LIVE_WINDOW_S} seconds"
                 else:
@@ -834,7 +942,10 @@ class App:
         except (OSError, ValueError, KeyError) as e:
             messagebox.showerror(APP_NAME, f"Couldn't read that log:\n{e}")
             return
-        findings = analysis.analyze(hist, params, window=None)
+        if any(n in params for n in ("Long trim B1", "Mass air flow", "O2 B1S1 (upstream)")):
+            findings = obd_analysis.analyze(hist, self.vehicle_profile(), window=None)
+        else:
+            findings = analysis.analyze(hist, params, window=None)
         self.an_calc = derived.calculated(hist, self.baseline_baro())
         secs = hist[-1][0] - hist[0][0] if hist else 0
         self.an_log = path
@@ -876,6 +987,145 @@ class App:
     def open_vehicles(self):
         VehiclesWindow(self)
 
+    # ------------------------------------------------------------ Codes
+
+    def _build_codes_tab(self):
+        tab = ttk.Frame(self.nb, padding=10)
+        self.codes_tab = tab
+        self.nb.add(tab, text="Codes")
+        top = ttk.Frame(tab)
+        top.pack(fill="x")
+        self.codes_read_btn = ttk.Button(top, text="Read codes & readiness", command=self.read_codes)
+        self.codes_read_btn.pack(side="left")
+        self.codes_clear_btn = ttk.Button(top, text="Clear codes…", command=self.ask_clear_codes)
+        self.codes_clear_btn.pack(side="left", padx=6)
+        self.codes_confirm = ttk.Frame(tab)
+        ttk.Label(self.codes_confirm, foreground=self.c["bad"], wraplength=900, text=(
+            "Clearing erases the stored codes and freeze frame and resets all readiness monitors: "
+            "the car won't pass an emissions inspection until they complete again (usually after "
+            "a few days of normal driving). Only clear after a repair, or to see if a code returns.")
+                  ).pack(anchor="w", pady=(6, 4))
+        row = ttk.Frame(self.codes_confirm)
+        row.pack(anchor="w")
+        ttk.Button(row, text="Yes, clear the codes", command=self.clear_codes).pack(side="left")
+        ttk.Button(row, text="Cancel", command=lambda: self.codes_confirm.pack_forget()).pack(
+            side="left", padx=6)
+        self.codes_text = tk.Text(tab, wrap="word", font=("Helvetica", 13), padx=12, pady=10,
+                                  background="white", foreground=INK, relief="flat", cursor="arrow")
+        self.codes_text.pack(fill="both", expand=True, pady=(8, 0))
+        t = self.codes_text
+        t.tag_configure("h", font=("Helvetica", 15, "bold"), spacing1=8)
+        t.tag_configure("bad", foreground="#c0392b", font=("Helvetica", 13, "bold"))
+        t.tag_configure("good", foreground="#1e8449", font=("Helvetica", 13, "bold"))
+        t.tag_configure("warn", foreground="#b9770e", font=("Helvetica", 13, "bold"))
+        t.tag_configure("muted", foreground="#5f6670")
+        t.tag_configure("code", font=("Menlo", 13, "bold"))
+        self.codes_write([("Connect to a car (or a demo), then click Read codes & readiness.\n", "muted")])
+
+    def codes_write(self, parts, clear=True):
+        t = self.codes_text
+        t.configure(state="normal")
+        if clear:
+            t.delete("1.0", "end")
+        for text, tag in parts:
+            t.insert("end", text, tag or ())
+        t.configure(state="disabled")
+
+    def _obd_src(self):
+        src = getattr(self.reader, "src", None) if self.reader else None
+        return src if isinstance(src, obd_source.ObdSource) else None
+
+    def read_codes(self):
+        src = self._obd_src()
+        if src is None:
+            if self.reader is not None and not self.is_obd():
+                codes = (self.history[-1][1].get("_codes") if self.history else None) or []
+                self.codes_write([("Fiero (ALDL)\n", "h"),
+                                  ("Current codes from the data stream: ", None),
+                                  (", ".join(f"{c} ({x})" for c, x in codes) or "none", "code"),
+                                  ("\n\nThe 1980s ECM sends its codes live, so they're always on the "
+                                   "Dashboard and in Analysis. It has no clear command over ALDL; codes "
+                                   "clear themselves after the fault is gone and the engine has been "
+                                   "started a number of times, or when the ECM loses power.\n", "muted")])
+            else:
+                messagebox.showinfo(APP_NAME, "Connect to an OBD-II car (or the Grand Prix demo) first.")
+            return
+        self.codes_write([("Reading codes, readiness, freeze frame and VIN…\n", "muted")])
+        src.call(obd_source.codes_report, lambda r: self.q.put(("obd_result", ("report", r))))
+
+    def ask_clear_codes(self):
+        if self._obd_src() is None:
+            messagebox.showinfo(APP_NAME, "Clearing codes needs an OBD-II connection.")
+            return
+        self.codes_confirm.pack(fill="x", after=self.codes_read_btn.master)
+
+    def clear_codes(self):
+        self.codes_confirm.pack_forget()
+        src = self._obd_src()
+        if src is None:
+            return
+        self.log("Clearing trouble codes…")
+        src.call(lambda elm: elm.clear_codes(), lambda r: self.q.put(("obd_result", ("clear", r))))
+
+    def codes_result(self, kind, r):
+        if isinstance(r, Exception):
+            self.codes_write([(f"Couldn't read from the car: {r}\n", "bad")])
+            return
+        if kind == "clear":
+            self.log("Codes cleared." if r else "The car didn't confirm clearing the codes.")
+            self.read_codes()
+            return
+        self.last_codes_report = r
+        prof = self.vehicle_profile()
+        st = r.get("status") or {}
+        parts = [(((prof or {}).get("vehicle", {}).get("name") or "OBD-II car") + "\n", "h"),
+                 (f"VIN {r.get('vin') or 'not reported'} · {r.get('protocol', '')}\n", "muted")]
+        if st:
+            parts.append(("Check engine light: ", None))
+            parts.append(("ON\n" if st["mil"] else "off\n", "bad" if st["mil"] else "good"))
+        if r.get("fuel_status"):
+            parts.append((f"Fuel system: {r['fuel_status']}\n", "muted"))
+        for title, key, tag in (("Stored codes", "stored", "bad"), ("Pending codes", "pending", "warn"),
+                                ("Permanent codes", "permanent", "warn")):
+            codes = r.get(key) or []
+            if key == "permanent" and not codes:
+                continue
+            parts.append((f"\n{title}\n", "h"))
+            if not codes:
+                parts.append(("None.\n", "good"))
+            for code, text in codes:
+                parts.append((f"{code}  ", "code"))
+                parts.append((f"{text}\n", tag))
+                hint = obd_analysis.known_issue_hint(prof, code)
+                if hint:
+                    parts.append((f"    {hint}\n", "muted"))
+        ff = r.get("freeze") or {}
+        if ff.get("code"):
+            parts.append((f"\nFreeze frame (when {ff['code']} was stored)\n", "h"))
+            for name, val in ff.get("values", {}).items():
+                parts.append((f"{name}: {val:.1f}\n", None))
+        mons = st.get("monitors") or []
+        if mons:
+            parts.append(("\nReadiness monitors\n", "h"))
+            for name, state in mons:
+                parts.append((f"{name}: ", None))
+                parts.append((f"{state}\n", "good" if state == "complete" else "warn"))
+            incomplete = [n for n, s in mons if s != "complete" and n not in obd.CONTINUOUS]
+            if st.get("mil"):
+                verdict, tag = "Not ready: the check engine light is on.", "bad"
+            elif not incomplete:
+                verdict, tag = "Ready: every supported monitor is complete.", "good"
+            elif len(incomplete) == 1:
+                verdict, tag = ("Probably ready: one monitor incomplete (" + incomplete[0] + "). Many "
+                                "US inspection programs allow one for 2001+ cars."), "warn"
+            else:
+                verdict, tag = (f"Not ready yet: {len(incomplete)} monitors incomplete. Drive normally "
+                                "for a few days and check again."), "bad"
+            parts.append(("\nEmissions inspection: ", "h"))
+            parts.append((verdict + "\n", tag))
+            parts.append(("Rules vary by state; check yours.\n", "muted"))
+        self.codes_write(parts)
+
     # ------------------------------------------------------------ Tests
 
     def _build_tests_tab(self):
@@ -890,11 +1140,6 @@ class App:
         self.test_tree = ttk.Treeview(left, show="tree", height=18, selectmode="browse")
         self.test_tree.column("#0", width=250)
         self.test_tree.pack(fill="y", expand=True, pady=(6, 0))
-        groups = {}
-        for t in guided_tests.ALL_TESTS:
-            if t.condition not in groups:
-                groups[t.condition] = self.test_tree.insert("", "end", text=t.condition, open=True)
-            self.test_tree.insert(groups[t.condition], "end", iid=t.id, text=t.name)
         self.test_tree.bind("<<TreeviewSelect>>", lambda e: self.show_test())
 
         right = ttk.Frame(tab, padding=(16, 0, 0, 0))
@@ -932,13 +1177,27 @@ class App:
         self.test_text.tag_configure("h", font=("Helvetica", 13, "bold"), spacing1=6)
         self.test_text.tag_configure("li", lmargin1=14, lmargin2=26)
         self.test_text.configure(state="disabled")
-        self.test_tree.selection_set(guided_tests.ALL_TESTS[0].id)
-        self.show_test()
+        self.populate_tests()
         self.root.after(250, self.test_tick)
+
+    def current_tests(self):
+        return obd_tests.ALL_TESTS if self.is_obd() else guided_tests.ALL_TESTS
+
+    def populate_tests(self):
+        if self.runner is not None and not self.runner.done:
+            return
+        self.test_tree.delete(*self.test_tree.get_children())
+        groups = {}
+        for t in self.current_tests():
+            if t.condition not in groups:
+                groups[t.condition] = self.test_tree.insert("", "end", text=t.condition, open=True)
+            self.test_tree.insert(groups[t.condition], "end", iid=t.id, text=t.name)
+        self.test_tree.selection_set(self.current_tests()[0].id)
+        self.show_test()
 
     def selected_test(self):
         sel = self.test_tree.selection()
-        return next((t for t in guided_tests.ALL_TESTS if sel and t.id == sel[0]), None)
+        return next((t for t in self.current_tests() if sel and t.id == sel[0]), None)
 
     def _test_buttons(self):
         running = self.runner is not None and not self.runner.done
@@ -1050,7 +1309,7 @@ class App:
         if r is None or getattr(r, "_completed", False):
             return
         r._completed = True
-        result = r.result(self.params_by_name())
+        result = r.result(self.params_by_name(), {"profile": self.vehicle_profile()})
         hist = [(t, v) for t, v, _s in r.samples]
         self.test_results[r.test.id] = (r.test.name, result, hist)
         self._demo_mode("idle")
@@ -1206,7 +1465,9 @@ class App:
             return
         if self.claude_conv is None:
             try:
-                self.claude_conv = claude_assistant.Conversation(api_key=key)
+                prof = self.vehicle_profile()
+                self.claude_conv = claude_assistant.Conversation(
+                    api_key=key, system=claude_assistant.system_prompt_for(prof, self.is_obd()))
             except Exception as e:  # SDK missing or bad configuration
                 messagebox.showerror(APP_NAME, f"Couldn't start the Claude client:\n{e}")
                 return
@@ -1246,7 +1507,7 @@ class App:
         summary = claude_assistant.summary_for_live(self.history, self.params_by_name(),
                                                     self.baseline_baro(), self.recent_results())
         self.claude_start(f"[live data: last {len(self.history)} frames] What do you see, and "
-                          "what should I check?", claude_assistant.first_question(summary))
+                          "what should I check?", claude_assistant.first_question(summary, self._car_name()))
 
     def claude_ask_log(self):
         path = filedialog.askopenfilename(
@@ -1261,7 +1522,12 @@ class App:
             messagebox.showerror(APP_NAME, f"Couldn't read that log:\n{e}")
             return
         self.claude_start(f"[log: {os.path.basename(path)}] What do you see, and what should "
-                          "I check?", claude_assistant.first_question(summary))
+                          "I check?", claude_assistant.first_question(summary, self._car_name()))
+
+    def _car_name(self):
+        if not self.is_obd():
+            return None
+        return (self.vehicle_profile() or {}).get("vehicle", {}).get("name") or "car"
 
     def claude_send_followup(self):
         text = self.cl_entry.get().strip()
@@ -1502,10 +1768,17 @@ class VehiclesWindow:
 
     def use(self):
         p = self.selected()
-        if p:
-            self.app.save_settings(vehicle=p["vehicle"]["name"])
-            self.app.vehicle_var.set(p["vehicle"]["name"])
-            self.reload()
+        if not p:
+            return
+        app = self.app
+        app.save_settings(vehicle=p["vehicle"]["name"])
+        if app.reader is None:              # pick the matching kind of connection
+            if p["connection"]["type"] == "obd2" and not app.is_obd():
+                app.source_var.set(SRC_OBD)
+            elif p["connection"]["type"] == "aldl" and app.is_obd():
+                app.source_var.set(SRC_CABLE)
+        app.on_source_change()
+        self.reload()
 
     def _saved(self, dest, prof):
         self.app.log(f"Saved vehicle profile: {dest}")
@@ -1727,9 +2000,27 @@ def self_test(root, app, seconds=4.0):
 
     def finish_test():
         res = app.test_results.get("cold_sensors")
-        status = res[1].status if res else "not finished"
-        result["ok"] = result["ok"] and status == guided_tests.PASS
-        print(f"{result['line']} guided_test={status} "
+        result["status"] = res[1].status if res else "not finished"
+        result["ok"] = result["ok"] and result["status"] == guided_tests.PASS
+        # OBD-II: the Grand Prix demo through the real ELM327 driver.
+        app.disconnect()
+        app.source_var.set(SRC_DEMO_OBD)
+        app.on_source_change()
+        app.connect()
+        root.after(8000, obd_read_codes)
+
+    def obd_read_codes():
+        app.read_codes()
+        root.after(3000, finish_obd)
+
+    def finish_obd():
+        rpm = app.tiles.get("Engine RPM")
+        shown = rpm["value"].cget("text") if rpm else "--"
+        codes = app.codes_text.get("1.0", "end")
+        obd_ok = shown not in ("--", "") and "P0171" in codes and "Readiness monitors" in codes
+        result["ok"] = result["ok"] and obd_ok
+        print(f"{result['line']} guided_test={result['status']} "
+              f"obd_demo={'ok' if obd_ok else 'FAILED'} (rpm {shown}) "
               f"-> {'OK' if result['ok'] else 'FAILED'}")
         app.on_close()
 

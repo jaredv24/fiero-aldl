@@ -60,6 +60,8 @@ def parse_line(line):
             return ("P", (int(level), int(us)))
         if kind in ("S", "I"):
             return (kind, rest)
+        if kind in ("M", "J"):              # OBD-II source: definition / one sample (JSON)
+            return (kind, json.loads(rest))
     except ValueError:
         return None
     return None
