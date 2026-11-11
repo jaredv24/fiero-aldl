@@ -69,6 +69,12 @@ and the Analysis findings. The answer streams in; ask follow-ups below it.
 To run it from source instead: `python fiero_app.py` in the `python` folder
 (needs `pip install -r requirements.txt`).
 
+## Website
+
+`website/` is a one-page site with a live in-browser demo of the app (simulated data), ready
+for Vercel: import this repository in Vercel and set **Root Directory** to `website`. There's
+no build step; every push to `main` redeploys it.
+
 ## Folder layout
 
 | Path | What it is |
@@ -84,6 +90,7 @@ To run it from source instead: `python fiero_app.py` in the `python` folder
 | `python/cable_check.py` | Tests a USB cable and finds the settings that work |
 | `run_mac.command` | Double-click menu for the Mac |
 | `python/definitions/1227170_fiero_v6.json` | Fiero 2.8 V6 byte layout from GM data stream A29 (also used by the demo) |
+| `website/` | Landing page with a live demo, deployed on Vercel |
 | `WIRING.md` | Parts list, circuit, and safety checks |
 
 ## On a Mac without the app (command line)

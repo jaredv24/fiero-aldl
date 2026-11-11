@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fiero ALDL</title>
+<meta name="description" content="A free Mac app that turns your 1985-88 Fiero V6's diagnostic port into a live dashboard: gauges, trouble codes in plain English, a live chart and an engine checkup. Try the demo.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Fiero ALDL">
+<meta property="og:description" content="A free Mac app that turns your 1985-88 Fiero V6's diagnostic port into a live dashboard: gauges, trouble codes in plain English, a live chart and an engine checkup. Try the demo.">
+<meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#0d0f12">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d0f12'/%3E%3Cpath d='M7 22a9 9 0 0 1 18 0' fill='none' stroke='%23ffb547' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M16 22l5-7' stroke='%23b3261e' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+html { color-scheme: light; -webkit-text-size-adjust: 100%; }
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body { margin: 0; }
+img { max-width: 100%; }
+[hidden] { display: none !important; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one column; a dark instrument-cluster demo panel (same in both themes) sits right under the pitch, then features, steps and fine print. */
+:root {
+  --bg: #eef0f3;
+  --surface: #ffffff;
+  --fg: #15181d;
+  --muted: #565d6b;
+  --line: #d6dae1;
+  --accent: #b3261e;
+  --accent-fg: #ffffff;
+  --accent-soft: #f6e4e2;
+  /* instrument panel: deliberately dark in both themes */
+  --panel: #0d0f12;
+  --panel-2: #161a1f;
+  --panel-line: #262b32;
+  --panel-fg: #ece8df;
+  --panel-muted: #8c929b;
+  --amber: #ffb547;
+  --cyan: #74c7f2;
+  --bad: #ff6e61;
+  --warn: #ffc24f;
+  --good: #6fd492;
+  --info: #9aa4ae;
+  --font-display: "Saira Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101216; --surface: #181b21; --fg: #eceef2; --muted: #a2a8b4; --line: #2b2f37;
+    --accent: #f0614f; --accent-fg: #160805; --accent-soft: #2c1714; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101216; --surface: #181b21; --fg: #eceef2; --muted: #a2a8b4; --line: #2b2f37;
+  --accent: #f0614f; --accent-fg: #160805; --accent-soft: #2c1714; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1080px; margin: 0 auto; display: grid; gap: 72px; padding-block: 40px 64px; }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 700; line-height: 1.02; margin: 0; text-wrap: balance; letter-spacing: 0.005em; }
+h1 { font-size: clamp(2.6rem, 6vw, 4.4rem); }
+h2 { font-size: clamp(1.8rem, 3.6vw, 2.5rem); }
+h3 { font-size: 1.35rem; font-weight: 600; }
+p { margin: 0; }
+a { color: var(--accent); }
+a:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+/* hero */
+.hero { display: grid; gap: 20px; max-width: 760px; }
+.hero .lede { font-size: 1.2rem; color: var(--muted); max-width: 62ch; }
+.cta { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; text-decoration: none; cursor: pointer;
+  font: 600 0.98rem/1 var(--font-body); padding: 13px 18px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--fg);
+}
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.btn small { font-weight: 400; opacity: 0.8; }
+.spec { font-family: var(--font-mono); font-size: 0.82rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.spec span::before { content: "▪ "; color: var(--accent); }
+
+/* demo panel */
+.demo { background: var(--panel); color: var(--panel-fg); border-radius: 14px; border: 1px solid var(--panel-line); overflow: hidden; }
+.demo-head { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--panel-line); background: var(--panel-2); }
+.demo-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.demo-title strong { font-family: var(--font-display); font-size: 1.3rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--amber); }
+.demo-title span { font-family: var(--font-mono); font-size: 0.78rem; color: var(--panel-muted); }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--panel-line); border-radius: 8px; overflow: hidden; }
+.seg button, .pbtn {
+  font: 500 0.86rem/1 var(--font-body); color: var(--panel-fg); background: transparent; border: 0;
+  padding: 9px 12px; cursor: pointer;
+}
+.seg button + button { border-left: 1px solid var(--panel-line); }
+.seg button[aria-pressed="true"] { background: var(--amber); color: #1a1205; }
+.pbtn { border: 1px solid var(--panel-line); border-radius: 8px; }
+.seg button:focus-visible, .pbtn:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
+
+.status { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 18px 0; }
+.chip { font: 500 0.8rem/1 var(--font-mono); padding: 6px 9px; border-radius: 999px; border: 1px solid var(--panel-line); color: var(--panel-muted); }
+.chip.on { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
+.chip.code { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
+
+.demo-body { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 0; }
+.left, .right { padding: 16px 18px 18px; min-width: 0; }
+.right { border-left: 1px solid var(--panel-line); display: grid; gap: 14px; align-content: start; }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.tile { background: var(--panel-2); border: 1px solid var(--panel-line); border-radius: 10px; padding: 10px 12px 12px; display: grid; gap: 4px; min-width: 0; }
+.tile .k { font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--panel-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .v { font-family: var(--font-display); font-size: 2.1rem; font-weight: 600; line-height: 1; color: var(--amber); font-variant-numeric: tabular-nums; }
+.tile .v small { font-family: var(--font-body); font-size: 0.78rem; font-weight: 400; color: var(--panel-muted); margin-left: 4px; }
+.bar { height: 4px; background: var(--panel-line); border-radius: 2px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--amber); transition: width 0.35s ease; }
+
+.chartbox { margin-top: 14px; display: grid; gap: 6px; }
+.chartlabel { display: flex; justify-content: space-between; font: 500 0.78rem/1 var(--font-mono); color: var(--panel-muted); }
+canvas { display: block; width: 100%; height: 190px; }
+
+.findings-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.findings-h h3 { font-size: 1.15rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--panel-fg); }
+.findings-h span { font: 0.76rem var(--font-mono); color: var(--panel-muted); }
+.findings { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.finding { display: grid; gap: 3px; padding: 10px 12px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--panel-line); }
+.finding .sev { font: 600 0.72rem/1 var(--font-mono); letter-spacing: 0.08em; }
+.finding.problem .sev { color: var(--bad); }
+.finding.watch .sev { color: var(--warn); }
+.finding.ok .sev { color: var(--good); }
+.finding.info .sev { color: var(--info); }
+.finding b { font-weight: 600; }
+.finding p { font-size: 0.88rem; color: var(--panel-muted); }
+.demo-foot { padding: 10px 18px 14px; border-top: 1px solid var(--panel-line); font-size: 0.8rem; color: var(--panel-muted); }
+
+/* features */
+.section { display: grid; gap: 28px; }
+.section > header { display: grid; gap: 10px; max-width: 680px; }
+.section > header p { color: var(--muted); }
+.features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px 32px; }
+.feature { display: grid; gap: 8px; align-content: start; padding-top: 14px; border-top: 2px solid var(--line); }
+.feature p { color: var(--muted); font-size: 0.97rem; }
+
+/* ask claude example */
+.ask { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 32px; align-items: start; }
+.ask .copy { display: grid; gap: 14px; }
+.ask .copy p { color: var(--muted); }
+.chat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; display: grid; gap: 14px; }
+.chat .tag { justify-self: start; font: 500 0.72rem/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); background: var(--accent-soft); padding: 5px 8px; border-radius: 4px; }
+.chat .q { font-weight: 600; }
+.chat .a { display: grid; gap: 8px; font-size: 0.95rem; }
+.chat .a h4 { margin: 4px 0 0; font: 600 1.02rem/1.2 var(--font-body); }
+.chat .a ul, .chat .a ol { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
+.mono { font-family: var(--font-mono); font-size: 0.9em; }
+
+/* steps */
+.steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; counter-reset: step; }
+.step { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; gap: 8px; align-content: start; }
+.step::before { counter-increment: step; content: "Step " counter(step); font: 500 0.76rem/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.step p { color: var(--muted); font-size: 0.95rem; }
+
+.fine { border-top: 1px solid var(--line); padding-top: 24px; display: grid; gap: 10px; color: var(--muted); font-size: 0.9rem; max-width: 760px; }
+.fine strong { color: var(--fg); }
+
+@media (max-width: 860px) {
+  .demo-body, .ask { grid-template-columns: minmax(0, 1fr); }
+  .right { border-left: 0; border-top: 1px solid var(--panel-line); }
+  .features, .steps { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 480px) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tile .v { font-size: 1.8rem; }
+  .wrap { gap: 56px; padding-block: 28px 48px; }
+}
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="eyebrow">Mac app · free · v0.1.0</div>
+    <h1>See what your Fiero's engine computer sees.</h1>
+    <p class="lede">Fiero ALDL turns the diagnostic plug under the dash into a live dashboard on your Mac: gauges, trouble codes in plain English, a chart of what the engine is doing, and a checkup that tells you where to look. Built for chasing problems like an idle that won't settle.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/jaredv24/fiero-aldl/releases/download/v0.1.0/Fiero-ALDL-apple-silicon.zip">Download for Mac <small>Apple Silicon</small></a>
+      <a class="btn" href="https://github.com/jaredv24/fiero-aldl/releases/download/v0.1.0/Fiero-ALDL-intel.zip">Intel Mac</a>
+      <a class="btn" href="#demo">Try the demo</a>
+    </div>
+    <div class="spec"><span>1985–88 Fiero 2.8 V6 (L44)</span><span>ECM 1227170</span><span>GM data stream A29</span><span>160 baud, pin E</span></div>
+  </header>
+
+  <section class="demo" id="demo" aria-label="Live demo">
+    <div class="demo-head">
+      <div class="demo-title"><strong>Live demo</strong><span id="clock">simulated · t = 0 s</span></div>
+      <div class="controls">
+        <div class="seg" role="group" aria-label="Choose an example engine">
+          <button type="button" id="sc-hunt" data-scenario="hunt" aria-pressed="true">Hunting idle</button>
+          <button type="button" id="sc-ok" data-scenario="ok" aria-pressed="false">Healthy</button>
+          <button type="button" id="sc-egr" data-scenario="egr" aria-pressed="false">EGR fault</button>
+        </div>
+        <button type="button" class="pbtn" id="pause" aria-pressed="false">Pause</button>
+      </div>
+    </div>
+    <div class="status" id="status" aria-live="polite"></div>
+    <div class="demo-body">
+      <div class="left">
+        <div class="tiles" id="tiles"></div>
+        <div class="chartbox">
+          <div class="chartlabel"><span>Last 60 seconds</span><span><span style="color:var(--amber)">■</span> RPM &nbsp; <span style="color:var(--cyan)">■</span> IAC steps</span></div>
+          <canvas id="chart" aria-label="Chart of engine RPM and idle air control position over the last 60 seconds" role="img"></canvas>
+        </div>
+      </div>
+      <div class="right">
+        <div class="findings-h"><h3>Analysis</h3><span>last 30 s</span></div>
+        <ul class="findings" id="findings"></ul>
+      </div>
+    </div>
+    <div class="demo-foot">This is the app's demo mode running in your browser: the numbers are simulated, not from a real car. In the app, the same screens fill with live data from your ECM.</div>
+  </section>
+
+  <section class="section">
+    <header>
+      <div class="eyebrow">What it does</div>
+      <h2>Everything the old scan tools showed, plus a second opinion</h2>
+    </header>
+    <div class="features">
+      <div class="feature"><h3>Live dashboard</h3><p>RPM, coolant, throttle, MAP, O2, idle air control, fuel trims, spark advance, EGR and battery, decoded with GM's own formulas for your engine.</p></div>
+      <div class="feature"><h3>Trouble codes, named</h3><p>Codes 12 through 55 show up by name the moment the ECM sets them. No more counting Check Engine blinks.</p></div>
+      <div class="feature"><h3>The 60-second chart</h3><p>Watch RPM sag and the idle air valve chase it. A surging idle is obvious on a chart in a way it never is on a needle.</p></div>
+      <div class="feature"><h3>Automatic checkup</h3><p>Flags a hunting idle, a stalling dip, an idle valve that's shut or maxed out, lean or rich running, open loop on a warm engine, and bad sensor readings, with the usual causes.</p></div>
+      <div class="feature"><h3>Record and replay</h3><p>Save a cold start or a stall as a log you can open in Excel, analyze later, or send to someone who knows these cars.</p></div>
+      <div class="feature"><h3>Ask Claude</h3><p>Optional. Sends a summary of your readings to Claude, which explains what it sees and what to check first. Follow-up questions welcome.</p></div>
+    </div>
+  </section>
+
+  <section class="section ask">
+    <div class="copy">
+      <div class="eyebrow">Ask Claude</div>
+      <h2>A mechanic's eye on your actual numbers</h2>
+      <p>Click one button and Claude gets the readings, trouble codes, ECM status and the checkup results. It ranks the likely causes, quotes the numbers behind each one, and puts the cheap checks first.</p>
+      <p>Uses your own Anthropic API key, stored in the Mac Keychain. A question usually costs a few cents. Nothing is sent until you click.</p>
+    </div>
+    <div class="chat">
+      <span class="tag">Example answer</span>
+      <div class="q">“What do you see, and what should I check?”</div>
+      <div class="a">
+        <h4>What the data shows</h4>
+        <ul>
+          <li>Idle swings between about <span class="mono">650</span> and <span class="mono">1150 rpm</span> on a 6-second cycle.</li>
+          <li>The idle air valve opens to <span class="mono">95 steps</span> as RPM falls, then snaps shut when it recovers. The ECM is chasing the idle, not holding it.</li>
+          <li>Long-term fuel trim climbs to <span class="mono">138</span>, so the ECM is adding fuel: it sees a lean mixture.</li>
+        </ul>
+        <h4>Check first</h4>
+        <ol>
+          <li>Vacuum leaks: listen for hissing around the plenum and PCV hoses with the engine idling.</li>
+          <li>EGR valve: engine off and cool, push the diaphragm up. It should move freely and spring shut.</li>
+          <li>Throttle body and idle air passage: clean them, and don't touch the factory idle stop screw.</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <header>
+      <div class="eyebrow">Getting started</div>
+      <h2>From download to live data</h2>
+    </header>
+    <div class="steps">
+      <div class="step"><h3>Try the demo</h3><p>Download the app, open it, pick <b>Demo (no car)</b> and click <b>Connect</b>. Every screen works with no hardware.</p></div>
+      <div class="step"><h3>Plug in a cable</h3><p>Get a GM 12-pin ALDL to USB cable that reads <b>160 baud on pin E</b>. Turn its 10k switch on, plug it in under the dash, key on.</p></div>
+      <div class="step"><h3>Check the cable</h3><p>Choose <b>USB ALDL cable</b> and click <b>Check cable</b>. It finds the right settings and confirms the Fiero's 25-byte frames.</p></div>
+    </div>
+  </section>
+
+  <footer class="fine">
+    <p><strong>Early release.</strong> The readings follow GM's data stream specification for this engine and are tested against simulated signals. They haven't been checked on a real car yet.</p>
+    <p><strong>First open on a Mac:</strong> the app isn't signed by Apple, so macOS blocks it once. Click Done, then System Settings → Privacy &amp; Security → Open Anyway.</p>
+    <p>Fiero ALDL is an independent hobby project. Source, wiring guide and releases: <a href="https://github.com/jaredv24/fiero-aldl">github.com/jaredv24/fiero-aldl</a></p>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var STEP = 0.5;               // seconds between simulated frames
+  var KEEP = 60;                // chart window
+  var WINDOW = 30;              // analysis window
+  var state = { scenario: "hunt", t: 0, hist: [], paused: false, cross: 0 };
+
+  var TILES = [
+    { key: "rpm", name: "Engine RPM", unit: "rpm", dec: 0, lo: 0, hi: 2000 },
+    { key: "iac", name: "IAC position", unit: "steps", dec: 0, lo: 0, hi: 160 },
+    { key: "clt", name: "Coolant", unit: "°F", dec: 0, lo: 40, hi: 230 },
+    { key: "map", name: "MAP", unit: "V", dec: 2, lo: 0, hi: 5 },
+    { key: "o2", name: "O2 sensor", unit: "mV", dec: 0, lo: 0, hi: 1000 },
+    { key: "blm", name: "Long trim (BLM)", unit: "", dec: 0, lo: 100, hi: 156 }
+  ];
+
+  function rnd(a) { return (Math.random() * 2 - 1) * a; }
+
+  // Simulated ECM readings for each example engine.
+  function frame(sc, t) {
+    var coolant = Math.min(195, 120 + t * 2.5);
+    var warm = coolant >= 160;
+    var v = { clt: coolant, codes: [] };
+    if (sc === "hunt") {
+      var ph = (t % 6) / 6;
+      v.rpm = 1150 - 550 * ph + rnd(25);
+      v.iac = 15 + 80 * ph;
+      v.map = 1.3 + 0.3 * ph;
+      v.o2 = 450 + 400 * Math.sin(t * 3);
+      v.blm = 128 + 10 * ph;
+    } else if (sc === "ok") {
+      v.rpm = 800 + 20 * Math.sin(t) + rnd(12);
+      v.iac = 32 + 2 * Math.sin(t / 3);
+      v.map = 1.12 + 0.02 * Math.sin(t);
+      v.o2 = 450 + 380 * Math.sin(t * 3.2);
+      v.blm = 128 + 2 * Math.sin(t / 5);
+    } else {
+      v.rpm = 720 + 140 * Math.sin(t * 1.3) + rnd(60);
+      v.iac = 4 + rnd(1);
+      v.map = 1.62 + 0.08 * Math.sin(t * 1.3);
+      v.o2 = 470 + 350 * Math.sin(t * 2.6);
+      v.blm = 121 + rnd(1);
+      v.codes = [[32, "Exhaust gas recirculation (EGR) failure"]];
+    }
+    v.closed = warm;
+    v.pn = true;
+    return v;
+  }
+
+  // A preview of the app's Analysis checks (the app runs more).
+  function analyze(hist) {
+    var out = [];
+    if (hist.length < 5) return [{ sev: "info", t: "Collecting data…", d: hist.length + " readings so far." }];
+    var end = hist[hist.length - 1].t;
+    var rows = hist.filter(function (h) { return h.t >= end - WINDOW; });
+    var codes = {};
+    rows.forEach(function (r) { r.v.codes.forEach(function (c) { codes[c[0]] = c[1]; }); });
+    Object.keys(codes).forEach(function (c) {
+      out.push({ sev: "problem", t: "ECM trouble code " + c + ": " + codes[c],
+                 d: "Reported by the ECM in the data stream. Fix codes first; they often explain the symptoms." });
+    });
+    var rpm = rows.map(function (r) { return r.v.rpm; });
+    var iac = rows.map(function (r) { return r.v.iac; });
+    var lo = Math.min.apply(null, rpm), hi = Math.max.apply(null, rpm), span = hi - lo;
+    if (span > 300) out.push({ sev: "problem", t: "Idle is hunting",
+      d: "RPM swung between " + Math.round(lo / 25) * 25 + " and " + Math.round(hi / 25) * 25 + " (" + Math.round(span) + " rpm) while idling." });
+    else if (span > 150) out.push({ sev: "watch", t: "Idle a little unsteady", d: "RPM varied by " + Math.round(span) + " rpm at idle." });
+    if (lo < 550) out.push({ sev: "problem", t: "RPM dropping close to stalling", d: "Lowest idle reading " + Math.round(lo) + " rpm." });
+    if (Math.min.apply(null, iac) <= 5 && (span > 150 || median(rpm) > 1000))
+      out.push({ sev: "problem", t: "Idle air valve shut, idle still unstable",
+                 d: "The ECM has closed off its idle air and the engine still gets too much: look for a vacuum leak or an EGR valve stuck open." });
+    if (Math.max.apply(null, iac) >= 140)
+      out.push({ sev: "problem", t: "Idle air valve near its maximum", d: "Dirty throttle body or IAC passage, or a fuel or ignition problem." });
+    var last = rows[rows.length - 1].v;
+    if (!last.closed) {
+      out.push({ sev: "info", t: "O2 checks wait for a warm engine", d: "Coolant is " + Math.round(last.clt) + " °F; they start above 160 °F." });
+    } else {
+      var o2 = rows.filter(function (r) { return r.v.closed; }).map(function (r) { return r.v.o2; });
+      var mean = o2.reduce(function (a, b) { return a + b; }, 0) / o2.length;
+      if (mean < 300) out.push({ sev: "problem", t: "Running lean (O2 stuck low)", d: "O2 averaged " + Math.round(mean) + " mV." });
+      else if (mean > 700) out.push({ sev: "problem", t: "Running rich (O2 stuck high)", d: "O2 averaged " + Math.round(mean) + " mV." });
+    }
+    var blm = median(rows.map(function (r) { return r.v.blm; }));
+    if (blm >= 150) out.push({ sev: "problem", t: "ECM adding lots of fuel (trim " + Math.round(blm) + ")", d: "Points to a vacuum leak or low fuel pressure." });
+    else if (blm <= 106) out.push({ sev: "problem", t: "ECM pulling lots of fuel (trim " + Math.round(blm) + ")", d: "Points to a leaking injector or a bad sensor reading." });
+    if (!out.some(function (f) { return f.sev === "problem" || f.sev === "watch"; }))
+      out.push({ sev: "ok", t: "Nothing out of the ordinary", d: "Idle steady around " + Math.round(median(rpm)) + " rpm; checked values are within typical ranges." });
+    var order = { problem: 0, watch: 1, ok: 2, info: 3 };
+    return out.sort(function (a, b) { return order[a.sev] - order[b.sev]; });
+  }
+
+  function median(a) {
+    var s = a.slice().sort(function (x, y) { return x - y; }), n = s.length;
+    return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
+  }
+
+  // ---- rendering
+  var tilesEl = document.getElementById("tiles");
+  var tileRefs = {};
+  TILES.forEach(function (d) {
+    var el = document.createElement("div");
+    el.className = "tile";
+    el.innerHTML = '<div class="k"></div><div class="v"><span>--</span><small></small></div><div class="bar"><i></i></div>';
+    el.querySelector(".k").textContent = d.name;
+    el.querySelector("small").textContent = d.unit;
+    tilesEl.appendChild(el);
+    tileRefs[d.key] = { val: el.querySelector(".v span"), bar: el.querySelector(".bar i") };
+  });
+
+  function renderTiles(v) {
+    TILES.forEach(function (d) {
+      var x = v[d.key];
+      tileRefs[d.key].val.textContent = x.toFixed(d.dec);
+      var f = Math.max(0, Math.min(1, (x - d.lo) / (d.hi - d.lo)));
+      tileRefs[d.key].bar.style.width = (f * 100).toFixed(1) + "%";
+    });
+  }
+
+  var statusEl = document.getElementById("status");
+  function renderStatus(v) {
+    var parts = [];
+    parts.push(v.codes.length
+      ? '<span class="chip code">Code ' + v.codes.map(function (c) { return c[0]; }).join(", ") + '</span>'
+      : '<span class="chip on">Trouble codes: none</span>');
+    parts.push('<span class="chip' + (v.closed ? ' on' : '') + '">' + (v.closed ? "Closed loop" : "Open loop (warming up)") + '</span>');
+    if (v.pn) parts.push('<span class="chip">Park/Neutral</span>');
+    parts.push('<span class="chip">ALDL 10k mode</span>');
+    var html = parts.join("");
+    if (statusEl.innerHTML !== html) statusEl.innerHTML = html;
+  }
+
+  var findEl = document.getElementById("findings");
+  var lastFindings = "";
+  function renderFindings() {
+    var f = analyze(state.hist);
+    var key = JSON.stringify(f);
+    if (key === lastFindings) return;
+    lastFindings = key;
+    findEl.innerHTML = "";
+    f.forEach(function (x) {
+      var li = document.createElement("li");
+      li.className = "finding " + x.sev;
+      li.innerHTML = '<span class="sev"></span><b></b><p></p>';
+      li.querySelector(".sev").textContent = x.sev.toUpperCase();
+      li.querySelector("b").textContent = x.t;
+      li.querySelector("p").textContent = x.d;
+      findEl.appendChild(li);
+    });
+  }
+
+  var canvas = document.getElementById("chart");
+  function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+  function drawChart() {
+    var dpr = window.devicePixelRatio || 1;
+    var w = canvas.clientWidth, h = canvas.clientHeight;
+    if (!w || !h) return;
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    var c = canvas.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, w, h);
+    var left = 44, right = 6, gap = 14, stripH = (h - gap) / 2;
+    var grid = cssVar("--panel-line"), muted = cssVar("--panel-muted");
+    var series = [
+      { key: "rpm", lo: 0, hi: 2000, color: cssVar("--amber"), ticks: [0, 1000, 2000] },
+      { key: "iac", lo: 0, hi: 160, color: cssVar("--cyan"), ticks: [0, 80, 160] }
+    ];
+    var now = state.hist.length ? state.hist[state.hist.length - 1].t : 0;
+    c.font = "500 11px " + cssVar("--font-mono");
+    series.forEach(function (s, i) {
+      var top = i * (stripH + gap), bottom = top + stripH;
+      function y(v) { return bottom - (bottom - top) * (v - s.lo) / (s.hi - s.lo); }
+      c.strokeStyle = grid; c.lineWidth = 1; c.fillStyle = muted;
+      c.textAlign = "right"; c.textBaseline = "middle";
+      s.ticks.forEach(function (tv) {
+        var yy = Math.round(y(tv)) + 0.5;
+        c.beginPath(); c.moveTo(left, yy); c.lineTo(w - right, yy); c.stroke();
+        c.fillText(String(tv), left - 6, Math.min(Math.max(yy, top + 6), bottom - 6));
+      });
+      var pts = state.hist.map(function (r) {
+        return [left + (w - right - left) * (1 - (now - r.t) / KEEP), y(Math.max(s.lo, Math.min(s.hi, r.v[s.key])))];
+      });
+      if (pts.length > 1) {
+        c.beginPath();
+        pts.forEach(function (p, j) { j ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]); });
+        c.lineTo(pts[pts.length - 1][0], bottom); c.lineTo(pts[0][0], bottom); c.closePath();
+        c.globalAlpha = 0.12; c.fillStyle = s.color; c.fill(); c.globalAlpha = 1;
+        c.beginPath();
+        pts.forEach(function (p, j) { j ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]); });
+        c.strokeStyle = s.color; c.lineWidth = 2; c.lineJoin = "round"; c.stroke();
+        var e = pts[pts.length - 1];
+        c.beginPath(); c.arc(e[0] - 1, e[1], 3.5, 0, Math.PI * 2); c.fillStyle = s.color; c.fill();
+      }
+    });
+  }
+
+  var clockEl = document.getElementById("clock");
+  function tick() {
+    if (state.paused) return;
+    state.t += STEP;
+    var v = frame(state.scenario, state.t);
+    state.hist.push({ t: state.t, v: v });
+    while (state.hist.length && state.t - state.hist[0].t > KEEP) state.hist.shift();
+    renderTiles(v);
+    renderStatus(v);
+    renderFindings();
+    drawChart();
+    clockEl.textContent = "simulated · t = " + Math.floor(state.t) + " s";
+  }
+
+  function reset(sc) {
+    state.scenario = sc; state.t = 0; state.hist = []; lastFindings = "";
+    // Pre-fill 60 s so the page opens with a full chart and real findings.
+    for (var i = 0; i < 120; i++) {
+      state.t += STEP;
+      state.hist.push({ t: state.t, v: frame(sc, state.t) });
+    }
+    var v = state.hist[state.hist.length - 1].v;
+    renderTiles(v); renderStatus(v); renderFindings(); drawChart();
+    clockEl.textContent = "simulated · t = " + Math.floor(state.t) + " s";
+  }
+
+  document.querySelectorAll(".seg button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      document.querySelectorAll(".seg button").forEach(function (o) { o.setAttribute("aria-pressed", String(o === b)); });
+      reset(b.dataset.scenario);
+    });
+  });
+  var pauseBtn = document.getElementById("pause");
+  pauseBtn.addEventListener("click", function () {
+    state.paused = !state.paused;
+    pauseBtn.setAttribute("aria-pressed", String(state.paused));
+    pauseBtn.textContent = state.paused ? "Resume" : "Pause";
+  });
+  window.addEventListener("resize", drawChart);
+  if (window.matchMedia) {
+    var mq = window.matchMedia("(prefers-color-scheme: dark)");
+    if (mq.addEventListener) mq.addEventListener("change", drawChart);
+  }
+
+  reset("hunt");
+  setInterval(tick, STEP * 1000);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawChart);
+})();
+</script>
+
+</body>
+</html>
