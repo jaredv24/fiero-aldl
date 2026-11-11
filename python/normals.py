@@ -1,15 +1,18 @@
-"""Sourced normal values for the Fiero 2.8 V6 (definitions/fiero_v6_normals.json)."""
+"""Sourced normal values for the Fiero 2.8 V6, from its vehicle profile
+(profiles/fiero-1985-88-2-8-v6.json)."""
 
 import json
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PATH = os.path.join(HERE, "definitions", "fiero_v6_normals.json")
+PATH = os.path.join(HERE, "profiles", "fiero-1985-88-2-8-v6.json")
 
 CONFIDENCE_LABEL = {
     "gm": "GM spec",
     "gm_general": "GM, this era",
-    "owners": "Fiero owners",
+    "oem": "factory spec",
+    "oem_general": "maker, this era",
+    "owners": "owners",
     "app": "app estimate",
 }
 
@@ -21,9 +24,10 @@ def load(path=PATH):
     if _cache is None or path != PATH:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
+        values = data.get("normals") or data.get("values")
         if path != PATH:
-            return data["values"]
-        _cache = data["values"]
+            return values
+        _cache = values
     return _cache
 
 

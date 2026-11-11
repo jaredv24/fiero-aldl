@@ -6,7 +6,7 @@ frame) and "_flags" ({flag name: bool}) when the byte layout defines them
 (the Fiero A29 layout does).
 Used by the app's Analysis tab, live (last 30 s) or on a saved CSV log.
 
-The limits come from definitions/fiero_v6_normals.json: GM chart values
+The limits come from the Fiero vehicle profile (profiles/): GM chart values
 where they could be found, otherwise GM figures for this era or consistent
 Fiero owner reports (each value records its source and confidence). They point at where to look; they are not a
 diagnosis. Each check only runs when the values it needs are mapped and in

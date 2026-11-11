@@ -1,7 +1,21 @@
 {
-  "name": "Normal values: 1985-88 Fiero 2.8 V6 (L44, VIN 9, ECM 1227170)",
-  "about": "Baseline readings used by the Analysis tab, the guided tests, the dashboard and Ask Claude. 'confidence' says how solid each figure is: gm = from a GM diagnostic chart or spec; gm_general = a GM figure for this generation of engines, not Fiero-specific; owners = consistent reports from Fiero owners; app = the app's own working estimate where no published figure was found.",
-  "values": {
+  "schema": "fiero-aldl.vehicle-profile/1",
+  "vehicle": {
+    "name": "1985-88 Pontiac Fiero 2.8 V6",
+    "years": "1985-1988",
+    "make": "Pontiac",
+    "model": "Fiero",
+    "engine": "2.8L V6 multi-port injection",
+    "engine_code": "L44 (VIN 9)",
+    "notes": "ECM 1227170. Read through the 12-pin ALDL connector at 160 baud (pin E)."
+  },
+  "connection": {
+    "type": "aldl",
+    "protocol": "GM ALDL 160 baud, data stream A29",
+    "definition": "1227170_fiero_v6.json",
+    "notes": "USB ALDL cable that supports 160 baud on pin E, or the Arduino interface. 10k mode (10 kohm across A-B)."
+  },
+  "normals": {
     "tps_closed": {
       "label": "Throttle (TPS), closed",
       "unit": "V",
@@ -18,7 +32,8 @@
         "https://www.fiero.nl/forum/Archives/Archive-000001/HTML/20041015-2-049217.html",
         "http://www.fieros.de/en/v6help/code22.html"
       ],
-      "short": "closed"
+      "short": "closed",
+      "signal": "TPS"
     },
     "tps_full": {
       "label": "Throttle (TPS), wide open",
@@ -29,7 +44,8 @@
       "confidence": "app",
       "note": "No published Fiero figure found. The reading should rise smoothly to near the 5 V reference.",
       "sources": [],
-      "short": "wide open"
+      "short": "wide open",
+      "signal": "TPS"
     },
     "map_koeo": {
       "label": "MAP, key on engine off",
@@ -42,7 +58,8 @@
       "sources": [
         "https://www.gmtuners.com/tech/MAF_MAP_IAT.htm"
       ],
-      "short": "engine off"
+      "short": "engine off",
+      "signal": "MAP"
     },
     "map_idle": {
       "label": "MAP at warm idle",
@@ -60,7 +77,8 @@
         "https://www.gmtuners.com/tech/MAF_MAP_IAT.htm",
         "https://www.pattonmachine.com/support-system/why-throttle-body-injection-tbi/accessing-understanding-ecm-trouble-codes/"
       ],
-      "short": "warm idle"
+      "short": "warm idle",
+      "signal": "MAP"
     },
     "iac_warm_idle": {
       "label": "IAC at warm idle",
@@ -79,7 +97,8 @@
         "https://www.justanswer.com/chevy/8d7di-chevrolet-celebrity-89-celebrity-2-8l-mpfi.html",
         "https://www.3800pro.com/threads/iac-value-at-idle.25225/"
       ],
-      "short": "warm idle"
+      "short": "warm idle",
+      "signal": "IAC position"
     },
     "rpm_warm_idle": {
       "label": "Warm idle speed",
@@ -92,7 +111,8 @@
       "sources": [
         "https://www.fiero.nl/forum/Forum2/HTML/134419.html"
       ],
-      "short": "warm idle"
+      "short": "warm idle",
+      "signal": "Engine RPM"
     },
     "blm": {
       "label": "Long-term fuel trim (BLM)",
@@ -110,7 +130,8 @@
         "https://www.turbotweaksupport.com/files/scanmasterinstructions.pdf",
         "https://www.fiero.nl/forum/Archives/Archive-000001/HTML/20100421-2-094621.html"
       ],
-      "short": "warm"
+      "short": "warm",
+      "signal": "BLM (long trim)"
     },
     "int": {
       "label": "Short-term fuel trim (INT)",
@@ -123,7 +144,8 @@
       "sources": [
         "https://www.fiero.nl/forum/Archives/Archive-000001/HTML/20100421-2-094621.html"
       ],
-      "short": "warm"
+      "short": "warm",
+      "signal": "INT (short trim)"
     },
     "o2": {
       "label": "O2 sensor",
@@ -142,7 +164,8 @@
         "https://www.gmtuners.com/tech/O2.htm",
         "https://www.justanswer.com/chevy/8d7di-chevrolet-celebrity-89-celebrity-2-8l-mpfi.html"
       ],
-      "short": "warm, switching"
+      "short": "warm, switching",
+      "signal": "O2 sensor"
     },
     "o2_switch_rate": {
       "label": "O2 switches per second",
@@ -172,7 +195,8 @@
         "https://www.fiero.nl/forum/Archives/Archive-000001/HTML/20100421-2-094157.html",
         "https://fiero.nl/forum/Archives/Archive-000001/HTML/20100421-2-094964.html"
       ],
-      "short": "warm"
+      "short": "warm",
+      "signal": "Coolant temp"
     },
     "battery_koeo": {
       "label": "Battery, engine off",
@@ -183,7 +207,8 @@
       "confidence": "app",
       "note": "General lead-acid figure: about 12.6 V when fully charged; under 12.2 V is low.",
       "sources": [],
-      "short": "engine off"
+      "short": "engine off",
+      "signal": "Battery"
     },
     "battery_running": {
       "label": "Charging voltage",
@@ -194,7 +219,8 @@
       "confidence": "app",
       "note": "General automotive charging range.",
       "sources": [],
-      "short": "running"
+      "short": "running",
+      "signal": "Battery"
     },
     "fuel_pressure": {
       "label": "Fuel pressure (gauge, not in the data stream)",
@@ -223,5 +249,12 @@
       ],
       "short": "set"
     }
+  },
+  "known_issues": [],
+  "enhanced_pids": [],
+  "research": {
+    "by": "Claude",
+    "date": "2026-11-11",
+    "notes": "Factory service manual pages were not reachable; GM diagnostic chart values were used where quoted by other sources."
   }
 }

@@ -41,7 +41,7 @@ jobs:
 
       - name: Unit tests
         working-directory: python
-        run: python -m unittest test_aldl_logger test_cable test_analysis test_claude_assistant test_derived test_guided_tests -v
+        run: python -m unittest test_aldl_logger test_cable test_analysis test_claude_assistant test_derived test_guided_tests test_vehicle_profile -v
 
       - name: App self-test (from source)
         working-directory: python
@@ -54,6 +54,7 @@ jobs:
           --name "Fiero ALDL"
           --osx-bundle-identifier io.github.jaredv24.fieroaldl
           --add-data "definitions:definitions"
+          --add-data "profiles:profiles"
           --collect-submodules anthropic
           --collect-submodules keyring
           --copy-metadata keyring

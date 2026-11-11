@@ -34,6 +34,7 @@ import claude_assistant
 import derived
 import guided_tests
 import normals
+import vehicle_profile
 import cable_check
 
 APP_NAME = "Fiero ALDL"
@@ -42,6 +43,8 @@ DATA_DIR = os.environ.get("FIERO_ALDL_DATA") or os.path.join(
     os.path.expanduser("~"), "Documents", APP_NAME)
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 TESTS_DIR = os.path.join(DATA_DIR, "tests")
+VEHICLES_DIR = os.path.join(DATA_DIR, "vehicles")
+SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 BASELINE_PATH = os.path.join(DATA_DIR, "baseline.json")
 LAYOUT_PATH = os.path.join(DATA_DIR, "my_layout.json")
 CABLE_SETTINGS = os.path.join(DATA_DIR, "cable_settings.json")
@@ -83,6 +86,7 @@ def label_colors(dark):
 def setup_data_dir():
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(TESTS_DIR, exist_ok=True)
+    os.makedirs(VEHICLES_DIR, exist_ok=True)
     if not os.path.exists(LAYOUT_PATH) or _is_blank_layout(LAYOUT_PATH):
         shutil.copyfile(TEMPLATE_DEF, LAYOUT_PATH)
     cable_check.SETTINGS = CABLE_SETTINGS
@@ -193,6 +197,7 @@ class App:
         self._build_tabs()
         self._build_statusbar()
         self.refresh_ports()
+        self.vehicle_var.set(self.active_vehicle_name())
         self.on_source_change()
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         root.after(100, self.poll)
@@ -230,6 +235,11 @@ class App:
 
         adv = ttk.Frame(self.root, padding=(10, 0, 10, 6))
         adv.pack(fill="x")
+        self.vehicle_var = tk.StringVar()
+        ttk.Label(adv, text="Vehicle:").pack(side="left")
+        ttk.Label(adv, textvariable=self.vehicle_var, font=("Helvetica", 13, "bold")).pack(
+            side="left", padx=(4, 6))
+        ttk.Button(adv, text="Vehicles…", command=self.open_vehicles).pack(side="left", padx=(0, 12))
         self.hint_var = tk.StringVar()
         ttk.Label(adv, textvariable=self.hint_var, foreground=self.c["muted"]).pack(side="left")
         self.invert_var = tk.BooleanVar(value=False)
@@ -838,6 +848,34 @@ class App:
         self.an_last = None
         self.live_btn.pack_forget()
 
+    # --------------------------------------------------------- Vehicles
+
+    def settings(self):
+        try:
+            with open(SETTINGS_PATH, encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def save_settings(self, **changes):
+        data = self.settings()
+        data.update(changes)
+        try:
+            with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except OSError as e:
+            self.log(f"Couldn't save settings: {e}")
+
+    def active_vehicle_name(self):
+        name = self.settings().get("vehicle")
+        names = [p["vehicle"]["name"] for _, p in vehicle_profile.list_profiles(VEHICLES_DIR)]
+        if name in names:
+            return name
+        return next((n for n in names if "Fiero" in n), names[0] if names else "")
+
+    def open_vehicles(self):
+        VehiclesWindow(self)
+
     # ------------------------------------------------------------ Tests
 
     def _build_tests_tab(self):
@@ -1358,6 +1396,289 @@ class App:
         self.root.destroy()
 
 
+class VehiclesWindow:
+    """Browse vehicle profiles, research a new one with Claude, or import one."""
+
+    def __init__(self, app):
+        self.app = app
+        self.win = tk.Toplevel(app.root)
+        self.win.title("Vehicles")
+        self.win.geometry("980x640")
+        self.win.transient(app.root)
+        outer = ttk.Frame(self.win, padding=12)
+        outer.pack(fill="both", expand=True)
+        left = ttk.Frame(outer)
+        left.pack(side="left", fill="y")
+        ttk.Label(left, text="Vehicle profiles", font=("Helvetica", 14, "bold")).pack(anchor="w")
+        self.lst = tk.Listbox(left, width=34, height=14, foreground=INK, background="white",
+                              exportselection=False)
+        self.lst.pack(fill="y", expand=True, pady=6)
+        self.lst.bind("<<ListboxSelect>>", lambda e: self.show())
+        for text, cmd in (("Use this vehicle", self.use),
+                          ("Research a vehicle with Claude…", self.research),
+                          ("Import a profile file…", self.import_file),
+                          ("Paste a profile from Claude…", self.paste),
+                          ("Copy research request for Claude chat…", self.copy_prompt),
+                          ("Open profiles folder", lambda: open_folder(VEHICLES_DIR))):
+            ttk.Button(left, text=text, command=cmd).pack(fill="x", pady=2)
+        right = ttk.Frame(outer, padding=(12, 0, 0, 0))
+        right.pack(side="left", fill="both", expand=True)
+        self.txt = tk.Text(right, wrap="word", font=("Helvetica", 13), padx=12, pady=10,
+                           background="white", foreground=INK, relief="flat")
+        sb = ttk.Scrollbar(right, command=self.txt.yview)
+        self.txt.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        self.txt.pack(side="left", fill="both", expand=True)
+        self.txt.tag_configure("h1", font=("Helvetica", 17, "bold"))
+        self.txt.tag_configure("h2", font=("Helvetica", 14, "bold"), spacing1=10)
+        self.txt.tag_configure("k", font=("Helvetica", 13, "bold"))
+        self.txt.tag_configure("muted", foreground="#5f6670")
+        self.txt.tag_configure("conf", foreground="#2a6fdb", font=("Helvetica", 11, "bold"))
+        self.txt.tag_configure("src", foreground="#2a6fdb", font=("Helvetica", 11))
+        self.reload()
+
+    def reload(self, select_name=None):
+        self.items = vehicle_profile.list_profiles(VEHICLES_DIR)
+        self.lst.delete(0, "end")
+        current = self.app.active_vehicle_name()
+        for path, p in self.items:
+            mark = "✓ " if p["vehicle"]["name"] == current else "   "
+            mine = "" if path.startswith(vehicle_profile.BUILTIN_DIR) else "  (imported)"
+            self.lst.insert("end", f"{mark}{p['vehicle']['name']}{mine}")
+        want = select_name or current
+        idx = next((i for i, (_, p) in enumerate(self.items) if p["vehicle"]["name"] == want), 0)
+        if self.items:
+            self.lst.selection_set(idx)
+            self.show()
+
+    def selected(self):
+        sel = self.lst.curselection()
+        return self.items[sel[0]][1] if sel else None
+
+    def show(self):
+        p = self.selected()
+        if not p:
+            return
+        t = self.txt
+        t.configure(state="normal")
+        t.delete("1.0", "end")
+        v, c = p["vehicle"], p["connection"]
+        t.insert("end", v["name"] + "\n", "h1")
+        t.insert("end", f"{v.get('engine', '')} {('· ' + v['engine_code']) if v.get('engine_code') else ''}\n", "muted")
+        t.insert("end", f"Connection: {c.get('protocol', c['type'])}\n", "muted")
+        if c.get("notes"):
+            t.insert("end", c["notes"] + "\n", "muted")
+        if c["type"] == "obd2":
+            t.insert("end", "\nLive OBD-II connection for this vehicle is being added next; "
+                            "the profile is ready for it.\n", "k")
+        t.insert("end", "\nNormal values\n", "h2")
+        for key, n in p["normals"].items():
+            rng = vehicle_profile_range(n)
+            t.insert("end", f"{n['label']}: ", "k")
+            t.insert("end", f"{rng}  ({n['condition']})  ")
+            t.insert("end", vehicle_profile.CONFIDENCE.get(n["confidence"], n["confidence"]) + "\n", "conf")
+            t.insert("end", n["note"] + "\n", "muted")
+            for s in n.get("sources", []):
+                t.insert("end", "  " + s + "\n", "src")
+        if p.get("known_issues"):
+            t.insert("end", "\nKnown problems\n", "h2")
+            for k in p["known_issues"]:
+                t.insert("end", k["title"] + "\n", "k")
+                for label, field in (("Symptoms", "symptoms"), ("In the data", "what_data_shows"),
+                                     ("Check", "checks")):
+                    if k.get(field):
+                        t.insert("end", f"{label}: {k[field]}\n")
+                for s in k.get("sources", []):
+                    t.insert("end", "  " + s + "\n", "src")
+        if p.get("enhanced_pids"):
+            t.insert("end", "\nExtra data codes (mode 22)\n", "h2")
+            for e in p["enhanced_pids"]:
+                t.insert("end", f"{e['name']}: 22 {e['pid']} → {e['formula']} {e.get('unit', '')}\n")
+        r = p.get("research", {})
+        if r:
+            t.insert("end", "\nResearch notes\n", "h2")
+            t.insert("end", f"{r.get('by', '')} {r.get('date', '')}: {r.get('notes', '')}\n", "muted")
+        t.configure(state="disabled")
+
+    def use(self):
+        p = self.selected()
+        if p:
+            self.app.save_settings(vehicle=p["vehicle"]["name"])
+            self.app.vehicle_var.set(p["vehicle"]["name"])
+            self.reload()
+
+    def _saved(self, dest, prof):
+        self.app.log(f"Saved vehicle profile: {dest}")
+        self.reload(select_name=prof["vehicle"]["name"])
+
+    def import_file(self):
+        path = filedialog.askopenfilename(parent=self.win, title="Choose a vehicle profile",
+                                          filetypes=[("Vehicle profile", "*.json"), ("All files", "*")])
+        if not path:
+            return
+        try:
+            dest, prof = vehicle_profile.import_profile(path, VEHICLES_DIR)
+        except (OSError, vehicle_profile.ProfileError) as e:
+            messagebox.showerror(APP_NAME, f"That file isn't a valid vehicle profile:\n\n{e}",
+                                 parent=self.win)
+            return
+        self._saved(dest, prof)
+
+    def paste(self):
+        win = tk.Toplevel(self.win)
+        win.title("Paste a vehicle profile")
+        win.geometry("720x480")
+        frm = ttk.Frame(win, padding=12)
+        frm.pack(fill="both", expand=True)
+        ttk.Label(frm, wraplength=680, text="Paste Claude's whole reply (or just the JSON) "
+                  "below, then click Import.").pack(anchor="w")
+        box = tk.Text(frm, wrap="word", font=("Menlo", 11), background="white", foreground=INK)
+        box.pack(fill="both", expand=True, pady=8)
+
+        def do_import():
+            try:
+                prof = vehicle_profile.validate(vehicle_profile.extract_json(box.get("1.0", "end")))
+            except vehicle_profile.ProfileError as e:
+                messagebox.showerror(APP_NAME, f"That isn't a valid vehicle profile:\n\n{e}",
+                                     parent=win)
+                return
+            dest = os.path.join(VEHICLES_DIR, vehicle_profile.safe_filename(prof))
+            with open(dest, "w", encoding="utf-8") as f:
+                json.dump(prof, f, indent=2)
+            win.destroy()
+            self._saved(dest, prof)
+        ttk.Button(frm, text="Import", command=do_import).pack(anchor="e")
+
+    def _car_fields(self, parent):
+        fields = {}
+        for label, key, width in (("Year", "year", 8), ("Make", "make", 14), ("Model", "model", 22),
+                                  ("Engine", "engine", 22)):
+            ttk.Label(parent, text=label).pack(side="left")
+            e = ttk.Entry(parent, width=width)
+            e.pack(side="left", padx=(4, 10))
+            fields[key] = e
+        return fields
+
+    def copy_prompt(self):
+        win = tk.Toplevel(self.win)
+        win.title("Research request for Claude chat")
+        win.geometry("820x560")
+        frm = ttk.Frame(win, padding=12)
+        frm.pack(fill="both", expand=True)
+        row = ttk.Frame(frm)
+        row.pack(fill="x")
+        f = self._car_fields(row)
+        ttk.Label(frm, wraplength=780, foreground="#5f6670", text=(
+            "Fill in the car, click Make request, then Copy. Paste it into a Claude chat "
+            "(claude.ai, with web search on). When Claude replies, use 'Paste a profile from "
+            "Claude…' to import it.")).pack(anchor="w", pady=6)
+        box = tk.Text(frm, wrap="word", font=("Menlo", 11), background="white", foreground=INK)
+        box.pack(fill="both", expand=True)
+
+        def make():
+            box.delete("1.0", "end")
+            box.insert("1.0", vehicle_profile.research_prompt(
+                f["year"].get().strip(), f["make"].get().strip(), f["model"].get().strip(),
+                f["engine"].get().strip()))
+
+        def copy():
+            win.clipboard_clear()
+            win.clipboard_append(box.get("1.0", "end").strip())
+            copy_btn.configure(text="Copied")
+        btns = ttk.Frame(frm)
+        btns.pack(fill="x", pady=(8, 0))
+        ttk.Button(btns, text="Make request", command=make).pack(side="left")
+        copy_btn = ttk.Button(btns, text="Copy", command=copy)
+        copy_btn.pack(side="left", padx=6)
+
+    def research(self):
+        key = self.app.claude_api_key()
+        if not key:
+            if messagebox.askyesno(APP_NAME, "Researching a vehicle uses Claude and needs your "
+                                   "Anthropic API key. Add one now?", parent=self.win):
+                self.app.claude_key_dialog()
+            return
+        win = tk.Toplevel(self.win)
+        win.title("Research a vehicle with Claude")
+        win.geometry("760x300")
+        frm = ttk.Frame(win, padding=14)
+        frm.pack(fill="both", expand=True)
+        row = ttk.Frame(frm)
+        row.pack(fill="x")
+        f = self._car_fields(row)
+        ttk.Label(frm, wraplength=720, foreground="#5f6670", text=(
+            "Claude searches the web for this car's normal values, known problems and OBD "
+            "details, with sources, and builds a profile. It takes a few minutes and is billed "
+            "to your API key (usually under $2).")).pack(anchor="w", pady=8)
+        status = tk.StringVar(value="")
+        ttk.Label(frm, textvariable=status, font=("Helvetica", 13, "bold")).pack(anchor="w")
+        go = ttk.Button(frm, text="Start research")
+        go.pack(anchor="e", pady=(10, 0))
+        q = queue.Queue()
+
+        def start():
+            year, make_, model = (f[k].get().strip() for k in ("year", "make", "model"))
+            if not (year and make_ and model):
+                messagebox.showinfo(APP_NAME, "Enter at least the year, make and model.", parent=win)
+                return
+            go.configure(state="disabled")
+            status.set("Starting…")
+            engine = f["engine"].get().strip()
+
+            def work():
+                try:
+                    import anthropic
+                    client = anthropic.Anthropic(api_key=key)
+                    prof, cost = vehicle_profile.research_with_claude(
+                        client, year, make_, model, engine, on_progress=lambda t: q.put(("note", t)))
+                    q.put(("done", (prof, cost)))
+                except vehicle_profile.ProfileError as e:
+                    q.put(("error", f"Claude's profile couldn't be used: {e}"))
+                except Exception as e:  # noqa: BLE001 - shown to the user
+                    q.put(("error", claude_assistant.describe_error(e)))
+            threading.Thread(target=work, daemon=True).start()
+            poll()
+
+        def poll():
+            try:
+                while True:
+                    kind, val = q.get_nowait()
+                    if kind == "note":
+                        status.set(val)
+                    elif kind == "error":
+                        status.set("")
+                        go.configure(state="normal")
+                        messagebox.showerror(APP_NAME, val, parent=win)
+                        return
+                    elif kind == "done":
+                        prof, cost = val
+                        dest = os.path.join(VEHICLES_DIR, vehicle_profile.safe_filename(prof))
+                        with open(dest, "w", encoding="utf-8") as fh:
+                            json.dump(prof, fh, indent=2)
+                        win.destroy()
+                        self._saved(dest, prof)
+                        messagebox.showinfo(APP_NAME, f"Profile for {prof['vehicle']['name']} "
+                                            f"saved (about ${cost:.2f}). Check the values and "
+                                            "sources before relying on them.", parent=self.win)
+                        return
+            except queue.Empty:
+                pass
+            win.after(250, poll)
+        go.configure(command=start)
+
+
+def vehicle_profile_range(n):
+    lo, hi, unit = n.get("low"), n.get("high"), n.get("unit", "")
+    unit = {"F": "°F"}.get(unit, unit)
+    if lo is not None and hi is not None:
+        return f"{lo:g}–{hi:g} {unit}" if lo != hi else f"{lo:g} {unit}"
+    if lo is not None:
+        return f"≥ {lo:g} {unit}"
+    if hi is not None:
+        return f"≤ {hi:g} {unit}"
+    return "see note"
+
+
 def self_test(root, app, seconds=4.0):
     """Used by the build: connect to the demo, check data arrives, then quit."""
     result = {}
@@ -1391,11 +1712,13 @@ def self_test(root, app, seconds=4.0):
         except Exception as e:
             sdk = f"no ({e})"
         summary = claude_assistant.summary_for_live(app.history, app.params_by_name())
+        profiles = len(vehicle_profile.list_profiles(VEHICLES_DIR))
         result["ok"] = (app.frames >= 3 and shown not in ("--", "") and rows >= 2
                         and bool(analysed) and sdk.startswith("yes")
-                        and "Engine RPM:" in summary)
+                        and "Engine RPM:" in summary and profiles >= 2)
         result["line"] = (f"self-test: frames={app.frames} rpm_tile={shown} logged_rows={rows} "
-                          f"log_analysis={'yes' if analysed else 'no'} claude_sdk={sdk}")
+                          f"log_analysis={'yes' if analysed else 'no'} claude_sdk={sdk} "
+                          f"profiles={profiles}")
         # Run one guided test end to end through the Tests tab.
         app.test_tree.selection_set("cold_sensors")
         app.show_test()

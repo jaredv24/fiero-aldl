@@ -4,7 +4,7 @@ Each test is a list of timed steps (what to do, how long) plus an evaluate()
 that looks at the frames recorded during the test. The app's Tests tab runs
 them; nothing here touches the GUI, so the logic is unit tested on its own.
 
-The limits come from definitions/fiero_v6_normals.json (GM chart values where
+The limits come from the Fiero vehicle profile, profiles/fiero-1985-88-2-8-v6.json (GM chart values where
 found, otherwise GM figures for this era or Fiero owner reports, each with its
 source). They say where to look; they aren't a diagnosis. Because the ECM only
 sends a frame about every 1.5 s, steps that move a control (the throttle

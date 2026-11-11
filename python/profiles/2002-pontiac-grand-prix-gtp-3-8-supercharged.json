@@ -1,0 +1,212 @@
+{
+  "schema": "fiero-aldl.vehicle-profile/1",
+  "vehicle": {
+    "name": "2002 Pontiac Grand Prix GTP 3.8 supercharged",
+    "years": "2002",
+    "make": "Pontiac",
+    "model": "Grand Prix GTP",
+    "engine": "3.8L V6 supercharged (3800 Series II)",
+    "engine_code": "L67 (VIN 1)",
+    "notes": "OBD-II. The diagnostic plug is under the dash on the driver's side."
+  },
+  "connection": {
+    "type": "obd2",
+    "protocol": "SAE J1850 VPW (GM Class 2)",
+    "notes": "GM used J1850 VPW in this era (the service manual refers to 'Class 2'). Many cheap ELM327 clones don't support VPW; use an adapter that lists it, such as the OBDLink SX."
+  },
+  "normals": {
+    "rpm_warm_idle": {
+      "label": "Warm idle speed",
+      "signal": "rpm",
+      "unit": "rpm",
+      "low": 600,
+      "high": 850,
+      "condition": "warm idle in Park, A/C off",
+      "short": "warm idle",
+      "limits": {},
+      "confidence": "app",
+      "note": "No published idle spec for the GTP was found. The PCM controls idle with the IAC valve; a steady idle in this range is typical for the 3800. A non-supercharged 2002 GT was logged at about 900 rpm.",
+      "sources": [
+        "https://www.justanswer.com/pontiac/8yuy9-pontiac-2002-pontiac-grand-prix-gt-3-8l-v6-vin.html"
+      ]
+    },
+    "coolant_warm": {
+      "label": "Coolant, warm",
+      "signal": "coolant_temp",
+      "unit": "F",
+      "low": 190,
+      "high": 228,
+      "condition": "fully warm",
+      "short": "warm",
+      "limits": {
+        "thermostat": 195,
+        "fan_low_on": 215,
+        "fan_high_on": 226,
+        "overheat": 245
+      },
+      "confidence": "owners",
+      "note": "195 F thermostat. Owners report the PCM turns the low-speed fan on around 215 F and high speed around 226-228 F (one cites the factory manual at 221 F for high speed).",
+      "sources": [
+        "https://www.gmforum.com/oldsmobile-171/3800-series-ii-overheating-305868/",
+        "https://www.3800pro.com/threads/operating-temp.39540/",
+        "https://www.3800pro.com/threads/3800-series-ii-runs-hot-but-why.31186/"
+      ]
+    },
+    "maf_idle": {
+      "label": "Mass air flow at idle",
+      "signal": "maf",
+      "unit": "g/s",
+      "low": 4,
+      "high": 6,
+      "condition": "warm idle in Park, A/C off",
+      "short": "warm idle",
+      "limits": {},
+      "confidence": "owners",
+      "note": "A healthy L67 reads about 4-6 g/s at warm idle (one healthy car: 4.7 g/s), rising with RPM.",
+      "sources": [
+        "http://www.pontiacbonnevilleclub.com/forum/1992/topic15927.html",
+        "https://grandprixforums.com/3-8l-v6-supercharged-l67-l32-/105652-high-positive-fuel-trims-at-idle-but-no-vacuum-leak.html"
+      ]
+    },
+    "ltft": {
+      "label": "Long-term fuel trim",
+      "signal": "ltft_b1",
+      "unit": "%",
+      "low": -5,
+      "high": 5,
+      "condition": "warm, closed loop",
+      "short": "warm",
+      "limits": {
+        "watch_beyond": 10,
+        "problem_beyond": 20
+      },
+      "confidence": "owners",
+      "note": "Owners treat about +/-5% as normal. Persistent -15 to -25% shows up on L67s with vacuum leaks, injector or tune problems; large positive trims at idle point to vacuum leaks. Watch/problem limits are the app's.",
+      "sources": [
+        "http://www.pontiacbonnevilleclub.com/forum/1992/topic15927.html",
+        "https://www.grandprixforums.com/3-8l-v6-supercharged-l67-l32-/106692-negative-ltft-out-of-ideas.html"
+      ]
+    },
+    "stft": {
+      "label": "Short-term fuel trim",
+      "signal": "stft_b1",
+      "unit": "%",
+      "low": -10,
+      "high": 10,
+      "condition": "warm, closed loop",
+      "short": "warm",
+      "limits": {},
+      "confidence": "owners",
+      "note": "Short-term trim moves quickly; about +/-10% is considered acceptable.",
+      "sources": [
+        "https://www.grandprixforums.com/general-grand-prix-discussion/106912-2000-grand-prix-gtp-supercharged-idle-surging-and-stalls-at-idle.html"
+      ]
+    },
+    "o2_upstream": {
+      "label": "Upstream O2",
+      "signal": "o2_b1s1",
+      "unit": "V",
+      "low": 0.1,
+      "high": 0.9,
+      "condition": "warm, closed loop: switching",
+      "short": "warm, switching",
+      "limits": {
+        "stuck_lean_below": 0.3,
+        "stuck_rich_above": 0.8
+      },
+      "confidence": "app",
+      "note": "Narrowband sensor: switches between about 0.1 and 0.9 V several times a second when warm.",
+      "sources": []
+    },
+    "o2_downstream": {
+      "label": "Downstream O2 (after catalyst)",
+      "signal": "o2_b1s2",
+      "unit": "V",
+      "low": 0.45,
+      "high": 0.8,
+      "condition": "warm, steady cruise",
+      "short": "warm",
+      "limits": {},
+      "confidence": "app",
+      "note": "With a working catalyst the downstream sensor stays fairly steady; if it switches like the upstream one, the catalyst is weak.",
+      "sources": []
+    },
+    "battery_running": {
+      "label": "Charging voltage",
+      "signal": "battery",
+      "unit": "V",
+      "low": 13.5,
+      "high": 15.0,
+      "condition": "engine running",
+      "short": "running",
+      "limits": {},
+      "confidence": "app",
+      "note": "General automotive charging range. One owner's idle surge and stalling went away after the battery was charged.",
+      "sources": []
+    },
+    "fuel_pressure": {
+      "label": "Fuel pressure (gauge, not in OBD data)",
+      "signal": "fuel_pressure",
+      "unit": "psi",
+      "low": 48,
+      "high": 55,
+      "condition": "key on, pump running",
+      "short": "pump running",
+      "limits": {
+        "max": 65
+      },
+      "confidence": "gm_general",
+      "note": "Series II L67: 48-55 psi with the pump running (a factory manual quote gives 48-54). Above 55 psi can cause rich running; don't exceed 65 psi. Lower with vacuum on the regulator. Measure with a gauge on the fuel rail.",
+      "sources": [
+        "https://www.fastfieros.com/tech/fuel_pressure_L67.htm",
+        "https://www.w-body.com/topic/56272-normal-fuel-pressure-for-2002-3800-series-2-gp/"
+      ]
+    }
+  },
+  "known_issues": [
+    {
+      "title": "Intake gasket and PCV vacuum leaks",
+      "symptoms": "High or rough idle, idle surge; lean codes P0171/P0174, misfire P0300.",
+      "what_data_shows": "Positive fuel trims at idle that come back toward 0 at 2500 rpm.",
+      "checks": "Listen for hissing; spray carb cleaner around the upper intake and PCV hoses with the engine idling and watch for an RPM change. Upper/lower intake gaskets can also leak coolant into the oil.",
+      "sources": [
+        "https://repairpal.com/symptom/pontiac/grand-prix/2002/rough-idle",
+        "https://www.justanswer.com/pontiac/4wer8-pontiac-grand-prix-gtp-2000-grand-prix-3-8l.html",
+        "https://repairpal.com/intake-manifold-gaskets-may-leak-coolant-or-engine-oil-550"
+      ]
+    },
+    {
+      "title": "Supercharger coupler rattle",
+      "symptoms": "A rattle like rocks tumbling at idle that goes away with throttle.",
+      "what_data_shows": "Nothing specific; it's mechanical noise.",
+      "checks": "The coupler between the supercharger pulley shaft and rotors wears; replacing it usually fixes the noise (reported on a 1997 GTP).",
+      "sources": [
+        "https://grandprixforums.com/threads/supercharger-knocks.72688/"
+      ]
+    },
+    {
+      "title": "Idle surge or stalling with a weak battery",
+      "symptoms": "Idle surges or the engine stalls at idle.",
+      "what_data_shows": "Low system voltage.",
+      "checks": "Charge and test the battery and check the charging system before replacing sensors (an owner who had replaced the MAF, MAP and IAC fixed it this way).",
+      "sources": [
+        "https://grandprixforums.com/threads/2002-grand-prix-gt-3-8-idle-issue.101278/"
+      ]
+    },
+    {
+      "title": "Cheap OBD adapters won't connect",
+      "symptoms": "Scanner can't talk to the car.",
+      "what_data_shows": "No data.",
+      "checks": "Use an adapter that supports J1850 VPW (GM Class 2), such as an OBDLink SX; many cheap ELM327 clones don't.",
+      "sources": [
+        "https://gmtnation.com/forums/threads/class2-j1850-vpw-j2187-technical-question-look-for-a-tool.24746/"
+      ]
+    }
+  ],
+  "enhanced_pids": [],
+  "research": {
+    "by": "Claude",
+    "date": "2026-11-11",
+    "notes": "No factory scan-data specs for idle RPM, MAF or trims were reachable; those come from owner reports. GM enhanced (mode 22) PIDs for this car are not included yet: they need a source that gives each PID and its formula."
+  }
+}

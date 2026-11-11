@@ -43,6 +43,25 @@ stream, ECM 1227170). It reads the ECM through either a **ready-made USB ALDL ca
 Your logs, byte layout (`my_layout.json`) and cable settings are kept in
 **Documents → Fiero ALDL**.
 
+### Vehicles and vehicle profiles
+
+A **vehicle profile** is a file with one car's researched normal values (each with its sources
+and how solid it is), known problems, its OBD protocol and, optionally, maker-specific data
+codes. Click **Vehicles…** to see them. Built in: the 1985-88 Fiero 2.8 V6 and the 2002 Grand
+Prix GTP 3.8 supercharged. To add another car:
+
+- **Research a vehicle with Claude…**: enter the year, make, model and engine; Claude searches
+  the web and builds the profile (uses your API key, usually under $2).
+- **Copy research request for Claude chat…**: paste it into claude.ai with web search on, then
+  **Paste a profile from Claude…** to import the reply.
+- **Import a profile file…**: for a profile someone shared with you.
+
+Every profile is checked before it's used: values must be numbers in a sensible order, every
+non-estimate needs source links, and data-code formulas may only use simple arithmetic.
+Imported profiles are kept in **Documents → Fiero ALDL → vehicles**.
+
+Live OBD-II connection (for the Grand Prix and other 1996+ cars) is the next part being built.
+
 ### Guided tests
 
 | Test | When | What it checks |
@@ -62,8 +81,8 @@ Every test also works in **Demo** mode, where the simulated engine acts out each
 
 ### Normal values and calculations
 
-`python/definitions/fiero_v6_normals.json` holds the researched normal ranges for this engine,
-each with its source and how solid it is (GM chart value, GM figure for this era, Fiero owner
+The Fiero's vehicle profile (`python/profiles/fiero-1985-88-2-8-v6.json`) holds the researched
+normal ranges for this engine, each with its source and how solid it is (GM chart value, GM figure for this era, Fiero owner
 reports, or the app's own estimate where nothing was published). The dashboard shows each
 reading's normal range, and the Analysis tab, the tests and Ask Claude all judge against it.
 
@@ -120,7 +139,8 @@ published with GitHub Pages at **https://jaredv24.github.io/fiero-aldl/** by
 | `python/analysis.py` | The checks behind the Analysis tab |
 | `python/derived.py` | Values calculated from the data (O2 switch rate, hunt period, lead/lag, …) |
 | `python/guided_tests.py` | The guided tests and their pass/watch/fail rules |
-| `python/definitions/fiero_v6_normals.json` | Researched normal values, with sources |
+| `python/profiles/` | Built-in vehicle profiles (Fiero 2.8 V6, 2002 Grand Prix GTP) |
+| `python/vehicle_profile.py` | Vehicle profile format, checker, import and Claude research |
 | `python/claude_assistant.py` | The Ask Claude tab's data summary and Claude API calls |
 | `python/aldl_logger.py` | Command-line dashboard, logger, raw-byte viewer, signal checker |
 | `python/aldl160.py` | 160 baud decoding for USB cables (`--cable`) |
@@ -307,7 +327,7 @@ You can type these in the Arduino Serial Monitor at 115200 baud:
 ## Tests
 
 ```bash
-cd python && python -m unittest test_aldl_logger test_cable test_analysis test_claude_assistant test_derived test_guided_tests -v
+cd python && python -m unittest test_aldl_logger test_cable test_analysis test_claude_assistant test_derived test_guided_tests test_vehicle_profile -v
 ```
 
 ```bash
