@@ -232,11 +232,29 @@ class SimSource:
     made up: they are not readings from any real car.
     """
 
+    # GM A29 intake air temperature table (deg C, A/D counts), for the inverse.
+    _MAT_TABLE = [(-40, 255), (-20, 247), (0, 231), (10, 218), (20, 199), (30, 177),
+                  (40, 152), (50, 126), (60, 102), (70, 81), (80, 64), (90, 50), (100, 39)]
+
+    # Behaviours the guided tests can ask for (Step.demo_mode).
+    MODES = ("idle", "off", "tps_up", "tps_floor", "tps_down", "ac_on", "steer",
+             "drive_idle", "rpm2000", "drive", "stall")
+
     def __init__(self, interval=0.5):
         self.interval = interval
         self.cross = 0
         self.t0 = time.time()
         self.pulse_mode = False
+        self.mode = "idle"
+        self.mode_t0 = 0.0
+        self._coolant = None      # warms only while the engine runs
+        self._last_t = None
+
+    def set_mode(self, mode, t=None):
+        """Switch the simulated engine's behaviour (used by the guided tests)."""
+        if mode in self.MODES and mode != self.mode:
+            self.mode = mode
+            self.mode_t0 = (time.time() - self.t0) if t is None else t
 
     def send(self, chars):
         for c in chars:
@@ -245,40 +263,121 @@ class SimSource:
             elif c == "d":
                 self.pulse_mode = False
 
+    @classmethod
+    def _mat_counts(cls, deg_f):
+        c = (deg_f - 32) / 1.8
+        pts = cls._MAT_TABLE
+        if c <= pts[0][0]:
+            return pts[0][1]
+        for (c0, n0), (c1, n1) in zip(pts, pts[1:]):
+            if c <= c1:
+                return n0 + (n1 - n0) * (c - c0) / (c1 - c0)
+        return pts[-1][1]
+
     def frame(self, t):
+        mode, mt = self.mode, t - self.mode_t0
         # Idle drops toward stall, ECM opens the IAC, rpm kicks back up.
         phase = (t % 6.0) / 6.0
         rpm = 1150 - 550 * phase + random.uniform(-25, 25)
         iac = 15 + 80 * phase
-        coolant_f = min(195.0, 70 + t * 3)
-        # A narrowband O2 sensor reads a flat ~450 mV until it's hot; once the ECM
-        # is in closed loop it flips between lean (~100-200 mV) and rich (~700-850 mV).
-        if coolant_f >= 160:
-            o2_mv = 470 + 360 * math.tanh(3 * math.sin(t * 3.0))
-        else:
-            o2_mv = 450 + random.uniform(-12, 12)
         map_v = 1.3 + 0.3 * phase
         spark_deg = 12 + 6 * phase
+        tps = 0.52
+        speed = 0
+        blm, integ = 128 + 10 * phase, 128 + 6 * math.sin(t)
+        egr = 0.0
+        flags_mode = 0x20 | 0x04               # ALDL (10k) mode, reference pulses
+        mcu1 = 0x80 | 0x20                     # in Park/Neutral, A/C not requested
+        mcu2 = 0
+        o2_rate = 1                            # cross counter steps per frame when warm
+        running = True
+
+        if mode in ("off", "tps_up", "tps_floor", "tps_down"):
+            running = False
+            rpm, iac, map_v, spark_deg = 0, 40, 4.6, 0
+            if mode == "tps_up":
+                tps = 0.52 + (4.55 - 0.52) * min(1.0, mt / 15)
+            elif mode == "tps_floor":
+                tps = 4.55
+            elif mode == "tps_down":
+                tps = 4.55 - (4.55 - 0.52) * min(1.0, mt / 15)
+        elif mode == "ac_on":
+            rpm -= 110
+            iac += 12
+            mcu1 &= ~0x20                      # 0 = A/C requested
+            mcu2 |= 0x01                       # A/C clutch on
+        elif mode == "steer":
+            rpm -= 90
+            iac += 8
+            mcu2 |= 0x20                       # power steering switch
+        elif mode == "drive_idle":
+            rpm -= 130
+            iac += 10
+            mcu1 &= ~0x80                      # not in Park/Neutral
+        elif mode == "rpm2000":
+            rpm = 2250 + random.uniform(-40, 40)
+            iac, map_v, spark_deg, tps = 40, 0.95, 32, 1.35
+            blm, integ = 128 + random.uniform(-1, 1), 128 + 3 * math.sin(t * 2)
+            o2_rate = 2
+        elif mode == "drive":
+            speed = 38 + 18 * math.sin(mt / 25)
+            ratio = 110 if speed <= 25 else 75 if speed <= 45 else 55
+            rpm = speed * ratio + random.uniform(-20, 20)
+            tps = 1.1 + 0.8 * (1 + math.sin(mt / 7)) / 2
+            map_v, spark_deg, iac = 2.4 + 0.6 * math.sin(mt / 7), 30, 40
+            blm, integ = 129, 128 + 3 * math.sin(t * 2)
+            egr = 25 if 35 <= speed <= 50 else 0
+            mcu1 &= ~0x80
+            flags_mode |= 0x01                 # road speed pulses
+            o2_rate = 2
+        elif mode == "stall":
+            rpm = rpm - 18 * mt
+            if rpm < 350 or getattr(self, "_stalled", False):
+                self._stalled = True
+                running = False
+                rpm, spark_deg = 0, 0
+                map_v = 4.6
+
+        if self._coolant is None:
+            self._coolant = min(195.0, 70 + t * 3)     # as if idling since t = 0
+        elif self._last_t is not None:
+            dt = max(0.0, t - self._last_t)
+            if running:
+                self._coolant = min(195.0, self._coolant + 3 * dt)
+            else:                                       # engine off: cools toward outside air
+                self._coolant = max(70.0, self._coolant - 6 * dt)
+        self._last_t = t
+        coolant_f = self._coolant
         warm = coolant_f >= 160
-        self.cross = (self.cross + (3 if warm else 0)) % 256
+        closed = warm and running
+        # A narrowband O2 sensor reads a flat ~450 mV until it's hot; once the ECM
+        # is in closed loop it flips between lean (~100-200 mV) and rich (~700-850 mV).
+        if closed:
+            o2_mv = 470 + 360 * math.tanh(3 * math.sin(t * 3.0 * o2_rate))
+            self.cross = (self.cross + o2_rate) % 256
+        else:
+            o2_mv = 450 + random.uniform(-12, 12)
+        mat_f = 70 + (coolant_f - 70) * 0.3    # intake air near outside temperature
         # Byte values are the inverse of the formulas in the A29 definition.
         vals = {
-            0: 0x20 | 0x04,                    # ALDL (10k) mode, reference pulses
+            0: flags_mode,
             3: iac,
             4: (coolant_f + 40) / 1.35,
-            5: 0,                              # parked
+            5: speed,
             6: map_v / 0.0196,
             7: rpm / 25,
-            8: 0.52 / 0.0196,
-            9: 128 + 6 * math.sin(t),
+            8: tps / 0.0196,
+            9: integ,
             10: o2_mv / 4.44,
-            14: (0x80 if warm else 0) | (0x40 if o2_mv > 450 else 0) | 0x02,
-            15: 0x80 | 0x20,                   # in Park, A/C not requested
-            17: 13.9 / 0.1,
-            18: 128 + 10 * phase,
+            14: (0x80 if closed else 0) | (0x40 if o2_mv > 450 else 0) | 0x02,
+            15: mcu1,
+            16: mcu2,
+            17: (13.9 if running else 12.6) / 0.1,
+            18: blm,
             19: self.cross,
             20: spark_deg / 0.3515625,
-            22: 177,                           # about 30 C / 86 F intake air
+            21: egr * 2.56,
+            22: self._mat_counts(mat_f),
             23: 0x05,
         }
         frame = bytearray(25)

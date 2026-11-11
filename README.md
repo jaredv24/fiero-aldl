@@ -25,6 +25,9 @@ stream, ECM 1227170). It reads the ECM through either a **ready-made USB ALDL ca
   plus the ECM's **trouble codes** and status (closed/open loop, Park/Neutral, A/C), all
   decoded from GM's Fiero V6 data stream spec
 - **Chart:** the last 60 seconds of any three values, stacked, for watching the idle hunt
+- **Tests:** ten guided tests with step-by-step instructions and a countdown, each ending in
+  PASS / WATCH / FAIL with the numbers behind it (see below). Results are saved to
+  **Documents → Fiero ALDL → tests**, and you can ask Claude about any result.
 - **Analysis:** flags readings out of the normal range in plain language (idle hunting,
   RPM near stall, IAC shut or maxed out, TPS off, lean/rich O2, fuel trims, open loop when
   warm, A/C load, charging voltage, a dead coolant sensor, ECM trouble codes, diagnostic
@@ -39,6 +42,36 @@ stream, ECM 1227170). It reads the ECM through either a **ready-made USB ALDL ca
 
 Your logs, byte layout (`my_layout.json`) and cable settings are kept in
 **Documents → Fiero ALDL**.
+
+### Guided tests
+
+| Test | When | What it checks |
+|---|---|---|
+| Key-on baseline | Engine off | MAP (atmospheric pressure, saved for later), closed TPS, battery, cold sensor agreement, trouble codes |
+| Cold-start sensor match | Engine off, sat 6+ h | Coolant and intake air sensors read the same outside temperature |
+| Throttle sensor sweep | Engine off | TPS rises and falls smoothly with the pedal; catches dropouts from a worn sensor |
+| Warm-up and thermostat | Cold start, idling | Warm-up rate, time to closed loop, where the temperature levels off |
+| Idle quality | Warm idle | Stability, the hunt's rhythm, what moves first, IAC, fuel correction, O2 switching |
+| Idle load response | Warm idle | Sag when adding A/C, steering and Drive |
+| Stall catcher | Idling or driving | Stops itself at a stall and explains the last 20 seconds |
+| 2000 rpm hold | 2000–2500 rpm | Lean only at idle = vacuum leak; lean at both = fuel delivery; O2 switching speed |
+| Charging system | 2000 rpm with loads | Alternator output |
+| Road test | Driving | Codes, speed signal, gears, spark pulled for knock, EGR use, fuel trims at cruise |
+
+Every test also works in **Demo** mode, where the simulated engine acts out each step.
+
+### Normal values and calculations
+
+`python/definitions/fiero_v6_normals.json` holds the researched normal ranges for this engine,
+each with its source and how solid it is (GM chart value, GM figure for this era, Fiero owner
+reports, or the app's own estimate where nothing was published). The dashboard shows each
+reading's normal range, and the Analysis tab, the tests and Ask Claude all judge against it.
+
+The Analysis tab also shows values **calculated from the data**: the exact O2 switch rate (from
+the ECM's own counter, so it isn't limited by the slow 1.5 s frames), total fuel correction, the
+RPM hunt's period and regularity, which reading moves first, manifold pressure as a share of
+atmosphere, relative airflow and fuel-flow indexes, gears in use, warm-up rate, spark pulled for
+knock, and one-frame sensor glitches that point to bad wiring.
 
 ### Ask Claude (optional)
 
@@ -85,6 +118,9 @@ published with GitHub Pages at **https://jaredv24.github.io/fiero-aldl/** by
 | `python/fiero_app.py` | The desktop app (window, dashboard, chart, raw bytes, recording) |
 | `.github/workflows/build-mac-app.yml` | Builds `Fiero ALDL.app` on GitHub's Macs |
 | `python/analysis.py` | The checks behind the Analysis tab |
+| `python/derived.py` | Values calculated from the data (O2 switch rate, hunt period, lead/lag, …) |
+| `python/guided_tests.py` | The guided tests and their pass/watch/fail rules |
+| `python/definitions/fiero_v6_normals.json` | Researched normal values, with sources |
 | `python/claude_assistant.py` | The Ask Claude tab's data summary and Claude API calls |
 | `python/aldl_logger.py` | Command-line dashboard, logger, raw-byte viewer, signal checker |
 | `python/aldl160.py` | 160 baud decoding for USB cables (`--cable`) |
@@ -271,7 +307,7 @@ You can type these in the Arduino Serial Monitor at 115200 baud:
 ## Tests
 
 ```bash
-cd python && python -m unittest test_aldl_logger test_cable test_analysis test_claude_assistant -v
+cd python && python -m unittest test_aldl_logger test_cable test_analysis test_claude_assistant test_derived test_guided_tests -v
 ```
 
 ```bash

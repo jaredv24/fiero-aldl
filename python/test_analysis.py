@@ -59,7 +59,7 @@ class AnalysisTests(unittest.TestCase):
             v = healthy(t)
             v["IAC position"] = 150
             return v
-        self.assertIn("IAC near its maximum", titles(an.analyze(history(starved), params())))
+        self.assertIn("IAC very high", titles(an.analyze(history(starved), params())))
 
     def test_dead_coolant_sensor(self):
         def cold(t):

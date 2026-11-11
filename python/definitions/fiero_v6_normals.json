@@ -1,0 +1,227 @@
+{
+  "name": "Normal values: 1985-88 Fiero 2.8 V6 (L44, VIN 9, ECM 1227170)",
+  "about": "Baseline readings used by the Analysis tab, the guided tests, the dashboard and Ask Claude. 'confidence' says how solid each figure is: gm = from a GM diagnostic chart or spec; gm_general = a GM figure for this generation of engines, not Fiero-specific; owners = consistent reports from Fiero owners; app = the app's own working estimate where no published figure was found.",
+  "values": {
+    "tps_closed": {
+      "label": "Throttle (TPS), closed",
+      "unit": "V",
+      "low": 0.5,
+      "high": 0.9,
+      "condition": "key on or idle, foot off",
+      "limits": {
+        "fail_low": 0.2,
+        "fail_high": 1.25
+      },
+      "confidence": "gm",
+      "note": "GM code 22 chart: a scan tool should read under 1.25 V with the throttle closed. Owners report 0.5-0.9 V. The 2.8 (VIN 9) TPS isn't adjustable.",
+      "sources": [
+        "https://www.fiero.nl/forum/Archives/Archive-000001/HTML/20041015-2-049217.html",
+        "http://www.fieros.de/en/v6help/code22.html"
+      ],
+      "short": "closed"
+    },
+    "tps_full": {
+      "label": "Throttle (TPS), wide open",
+      "unit": "V",
+      "low": 4.0,
+      "high": 4.9,
+      "condition": "pedal on the floor",
+      "confidence": "app",
+      "note": "No published Fiero figure found. The reading should rise smoothly to near the 5 V reference.",
+      "sources": [],
+      "short": "wide open"
+    },
+    "map_koeo": {
+      "label": "MAP, key on engine off",
+      "unit": "V",
+      "low": 4.3,
+      "high": 4.9,
+      "condition": "key on, engine off (reads the barometer)",
+      "confidence": "gm_general",
+      "note": "A GM 1-bar MAP sensor reads about 4.5 V with the key on and engine off (lower at altitude); the ECM uses this as barometric pressure.",
+      "sources": [
+        "https://www.gmtuners.com/tech/MAF_MAP_IAT.htm"
+      ],
+      "short": "engine off"
+    },
+    "map_idle": {
+      "label": "MAP at warm idle",
+      "unit": "V",
+      "low": 0.8,
+      "high": 1.5,
+      "condition": "warm idle, no load",
+      "limits": {
+        "code33_above": 4.0,
+        "code34_below": 0.25
+      },
+      "confidence": "gm_general",
+      "note": "Under 1.5 V at idle. Higher means less vacuum (vacuum leak, EGR open, late timing). Code 33 sets above about 4.0 V, code 34 below about 0.25 V.",
+      "sources": [
+        "https://www.gmtuners.com/tech/MAF_MAP_IAT.htm",
+        "https://www.pattonmachine.com/support-system/why-throttle-body-injection-tbi/accessing-understanding-ecm-trouble-codes/"
+      ],
+      "short": "warm idle"
+    },
+    "iac_warm_idle": {
+      "label": "IAC at warm idle",
+      "unit": "steps",
+      "low": 20,
+      "high": 40,
+      "condition": "warm idle in Park/Neutral, A/C off",
+      "limits": {
+        "too_much_air": 3,
+        "idle_too_low": 80
+      },
+      "confidence": "owners",
+      "note": "Owners report 20-40 (one Fiero thread: 30-35). Near 0 means too much air is getting in (vacuum leak, throttle). 80 or more means the idle is too low / not enough air.",
+      "sources": [
+        "https://www.fiero.nl/forum/Forum2/HTML/134419.html",
+        "https://www.justanswer.com/chevy/8d7di-chevrolet-celebrity-89-celebrity-2-8l-mpfi.html",
+        "https://www.3800pro.com/threads/iac-value-at-idle.25225/"
+      ],
+      "short": "warm idle"
+    },
+    "rpm_warm_idle": {
+      "label": "Warm idle speed",
+      "unit": "rpm",
+      "low": 800,
+      "high": 1000,
+      "condition": "warm idle in Park/Neutral",
+      "confidence": "owners",
+      "note": "Owners give about 900 rpm for the V6. The ECM sets it through the IAC; the throttle stop screw isn't the idle adjustment (base idle with the IAC fully closed is about 500 rpm).",
+      "sources": [
+        "https://www.fiero.nl/forum/Forum2/HTML/134419.html"
+      ],
+      "short": "warm idle"
+    },
+    "blm": {
+      "label": "Long-term fuel trim (BLM)",
+      "unit": "",
+      "low": 118,
+      "high": 138,
+      "condition": "warm, closed loop",
+      "limits": {
+        "prom_min": 120,
+        "prom_max": 150
+      },
+      "confidence": "gm_general",
+      "note": "128 = no correction. 118-138 is healthy for GM engines of this era. The stock V6 PROM limits BLM to about 120-150, so readings near those ends mean the ECM has run out of correction.",
+      "sources": [
+        "https://www.turbotweaksupport.com/files/scanmasterinstructions.pdf",
+        "https://www.fiero.nl/forum/Archives/Archive-000001/HTML/20100421-2-094621.html"
+      ],
+      "short": "warm"
+    },
+    "int": {
+      "label": "Short-term fuel trim (INT)",
+      "unit": "",
+      "low": 118,
+      "high": 138,
+      "condition": "warm, closed loop",
+      "confidence": "gm_general",
+      "note": "128 = no correction; it moves quickly around 128 while BLM moves slowly.",
+      "sources": [
+        "https://www.fiero.nl/forum/Archives/Archive-000001/HTML/20100421-2-094621.html"
+      ],
+      "short": "warm"
+    },
+    "o2": {
+      "label": "O2 sensor",
+      "unit": "mV",
+      "low": 100,
+      "high": 900,
+      "condition": "warm, closed loop: switching",
+      "limits": {
+        "bias": 450,
+        "stuck_lean_below": 300,
+        "stuck_rich_above": 800
+      },
+      "confidence": "gm_general",
+      "note": "Reads a steady ~450 mV bias until hot, then switches between about 100 and 900 mV. Suspect if it stays below 300 mV or fixed above 800 mV.",
+      "sources": [
+        "https://www.gmtuners.com/tech/O2.htm",
+        "https://www.justanswer.com/chevy/8d7di-chevrolet-celebrity-89-celebrity-2-8l-mpfi.html"
+      ],
+      "short": "warm, switching"
+    },
+    "o2_switch_rate": {
+      "label": "O2 switches per second",
+      "unit": "/s",
+      "low": 0.7,
+      "high": null,
+      "condition": "warm, about 2000 rpm",
+      "confidence": "app",
+      "note": "No published normal found. A healthy sensor switches several times per second at 2000 rpm; the app treats under 0.7/s as lazy and under 0.3/s as failed.",
+      "sources": [],
+      "short": "2000 rpm"
+    },
+    "coolant_warm": {
+      "label": "Coolant, warm",
+      "unit": "F",
+      "low": 190,
+      "high": 235,
+      "condition": "fully warm",
+      "limits": {
+        "thermostat": 195,
+        "fan_on": 235,
+        "overheat": 245
+      },
+      "confidence": "owners",
+      "note": "The 2.8 uses a 195 F thermostat; the ECM turns the fan on around 235 F.",
+      "sources": [
+        "https://www.fiero.nl/forum/Archives/Archive-000001/HTML/20100421-2-094157.html",
+        "https://fiero.nl/forum/Archives/Archive-000001/HTML/20100421-2-094964.html"
+      ],
+      "short": "warm"
+    },
+    "battery_koeo": {
+      "label": "Battery, engine off",
+      "unit": "V",
+      "low": 12.4,
+      "high": 12.8,
+      "condition": "key on, engine off",
+      "confidence": "app",
+      "note": "General lead-acid figure: about 12.6 V when fully charged; under 12.2 V is low.",
+      "sources": [],
+      "short": "engine off"
+    },
+    "battery_running": {
+      "label": "Charging voltage",
+      "unit": "V",
+      "low": 13.5,
+      "high": 15.0,
+      "condition": "engine running, about 2000 rpm",
+      "confidence": "app",
+      "note": "General automotive charging range.",
+      "sources": [],
+      "short": "running"
+    },
+    "fuel_pressure": {
+      "label": "Fuel pressure (gauge, not in the data stream)",
+      "unit": "psi",
+      "low": 40.5,
+      "high": 47,
+      "condition": "key on, engine off, pump running",
+      "confidence": "owners",
+      "note": "Quoted from GM's spec by owners. About 36-40 psi at idle (the regulator lowers it with vacuum). Measure with a gauge on the fuel rail.",
+      "sources": [
+        "https://www.fiero.nl/forum/Archives/Archive-000001/HTML/20070315-2-074278.html",
+        "https://www.fiero.nl/forum/Forum2/HTML/133579.html"
+      ],
+      "short": "key on, pump running"
+    },
+    "base_timing": {
+      "label": "Base ignition timing (timing light, not in the data stream)",
+      "unit": "deg BTDC",
+      "low": 10,
+      "high": 10,
+      "condition": "set with the timing connector disconnected",
+      "confidence": "owners",
+      "note": "Stock is 10 degrees BTDC.",
+      "sources": [
+        "https://fiero.nl/forum/Forum2/HTML/137232.html"
+      ],
+      "short": "set"
+    }
+  }
+}

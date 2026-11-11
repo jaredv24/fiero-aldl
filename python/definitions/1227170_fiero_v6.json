@@ -546,6 +546,21 @@
       "offset": 0,
       "bit": 6,
       "name": "High battery voltage"
+    },
+    {
+      "offset": 16,
+      "bit": 2,
+      "name": "Torque converter clutch on"
+    },
+    {
+      "offset": 0,
+      "bit": 1,
+      "name": "Knock (spark) control active"
+    },
+    {
+      "offset": 0,
+      "bit": 0,
+      "name": "Road speed pulse seen"
     }
   ]
 }

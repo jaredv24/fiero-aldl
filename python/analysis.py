@@ -6,14 +6,17 @@ frame) and "_flags" ({flag name: bool}) when the byte layout defines them
 (the Fiero A29 layout does).
 Used by the app's Analysis tab, live (last 30 s) or on a saved CSV log.
 
-The limits are typical guidelines for GM engines of this era, NOT factory
-specs for the Fiero 2.8. They point at where to look; they are not a
+The limits come from definitions/fiero_v6_normals.json: GM chart values
+where they could be found, otherwise GM figures for this era or consistent
+Fiero owner reports (each value records its source and confidence). They point at where to look; they are not a
 diagnosis. Each check only runs when the values it needs are mapped and in
 the expected units, so a wrong byte layout doesn't produce confident nonsense.
 """
 
 import csv
 import math
+
+import normals as nm
 from dataclasses import dataclass
 
 PROBLEM, WATCH, OK, INFO = "problem", "watch", "ok", "info"
@@ -124,9 +127,15 @@ def analyze(history, params, window=LIVE_WINDOW_S):
                                "A reading near -40 °F usually means an open circuit or bad "
                                "coolant sensor. The ECM then runs very rich, which can cause "
                                "a rough or stalling idle."))
-        elif running and hi >= 235:
+        elif running and hi >= nm.limit("coolant_warm", "overheat"):
             out.append(Finding(PROBLEM, "Engine running hot", f"Coolant reached {hi:.0f} °F.",
-                               "Check coolant level, fans and thermostat."))
+                               "The fan should come on around 235 °F. Check coolant level, the "
+                               "fan and the thermostat."))
+        elif running and hi > nm.limit("coolant_warm", "fan_on"):
+            out.append(Finding(WATCH, "Coolant above the fan-on point",
+                               f"Coolant reached {hi:.0f} °F (fan should come on around "
+                               f"{nm.limit('coolant_warm', 'fan_on')} °F).",
+                               "Check that the cooling fan runs."))
 
     # ---- Idle stability
     if idling:
@@ -147,18 +156,20 @@ def analyze(history, params, window=LIVE_WINDOW_S):
 
         iac = d.series("IAC position", "steps", idle_rows)
         if iac:
-            if min(iac) <= 3 and (span > 150 or _median(rpm) > 1000):
+            if min(iac) <= nm.limit("iac_warm_idle", "too_much_air") and (span > 150 or _median(rpm) > 1000):
                 out.append(Finding(PROBLEM, "IAC fully closed, idle still too high/unstable",
                                    f"IAC went down to {min(iac):.0f} steps.",
                                    "The ECM has shut off its idle air and the engine is still "
                                    "getting too much air: look for a vacuum leak, an EGR valve "
                                    "stuck open, or a throttle stop screw that's been turned."))
-            if max(iac) >= 140:
-                out.append(Finding(PROBLEM, "IAC near its maximum",
-                                   f"IAC reached {max(iac):.0f} steps.",
-                                   "The ECM is giving all the idle air it can and it's still not "
-                                   "enough: dirty throttle body or IAC passage, or a fuel or "
-                                   "ignition problem."))
+            high = nm.limit("iac_warm_idle", "idle_too_low")
+            if max(iac) >= high:
+                out.append(Finding(PROBLEM, "IAC very high",
+                                   f"IAC reached {max(iac):.0f} steps (warm idle is normally "
+                                   f"{nm.range_text('iac_warm_idle')}; {high}+ means idle too low).",
+                                   "The ECM is adding a lot of idle air and it's still not enough: "
+                                   "dirty throttle body or IAC passage, or a fuel or ignition "
+                                   "problem."))
 
         map_kpa = d.series("MAP", "kPa", idle_rows)
         if map_kpa:
@@ -174,18 +185,38 @@ def analyze(history, params, window=LIVE_WINDOW_S):
                                    "Follows the RPM hunt, or points to a leaking or loose "
                                    "MAP hose."))
 
+        map_v = d.series("MAP", "V", idle_rows)
+        if map_v:
+            m = _median(map_v)
+            if max(map_v) > nm.limit("map_idle", "code33_above"):
+                out.append(Finding(PROBLEM, "MAP reading near atmospheric while running",
+                                   f"MAP reached {max(map_v):.2f} V at idle (code 33 territory).",
+                                   "Check the MAP vacuum hose (off, cracked or blocked) and the "
+                                   "sensor."))
+            elif m > nm.get("map_idle")["high"]:
+                out.append(Finding(WATCH, "Low vacuum at idle (high MAP)",
+                                   f"MAP about {m:.2f} V at idle (normally "
+                                   f"{nm.range_text('map_idle')}).",
+                                   "Possible vacuum leak, EGR open at idle, late timing, or a bad "
+                                   "MAP sensor or hose."))
+
         tps = d.series("TPS", "V", idle_rows)
         if tps:
             m = _median(tps)
-            if m < 0.2:
+            lim = nm.get("tps_closed")["limits"]
+            if m < lim["fail_low"]:
                 out.append(Finding(PROBLEM, "TPS reading very low at idle",
-                                   f"{m:.2f} V (expected about 0.4–0.7 V closed).",
-                                   "Possible wiring or sensor fault."))
-            elif m > 0.8:
-                out.append(Finding(WATCH, "TPS high at closed throttle",
-                                   f"{m:.2f} V (expected about 0.4–0.7 V).",
-                                   "If it's above about 1 V the ECM may not know it's idling. "
-                                   "Check TPS adjustment or a sticking throttle."))
+                                   f"{m:.2f} V (normal closed: {nm.range_text('tps_closed')}).",
+                                   "Possible wiring or sensor fault (code 22 territory)."))
+            elif m > lim["fail_high"]:
+                out.append(Finding(PROBLEM, "TPS too high at closed throttle",
+                                   f"{m:.2f} V: GM's chart expects under {lim['fail_high']} V closed.",
+                                   "The ECM may not recognise idle. Check for a sticking throttle "
+                                   "or a bad TPS."))
+            elif m > nm.get("tps_closed")["high"]:
+                out.append(Finding(WATCH, "TPS on the high side at closed throttle",
+                                   f"{m:.2f} V (owners see {nm.range_text('tps_closed')}).",
+                                   "Check for a sticking throttle or cable."))
 
     # ---- Closed loop and idle load (status flags)
     recent_flags = flag_rows[-10:]
@@ -211,12 +242,12 @@ def analyze(history, params, window=LIVE_WINDOW_S):
             secs = max(history[-1][0] - history[0][0], 1)
             mean = sum(o2) / len(o2)
             per10 = _crossings(o2, 450) * 10 / secs
-            if mean < 300 and per10 < 1:
+            if mean < nm.limit("o2", "stuck_lean_below") and per10 < 1:
                 out.append(Finding(PROBLEM, "Running lean (O2 stuck low)",
                                    f"O2 averaged {mean:.0f} mV and rarely crossed 450 mV.",
                                    "Lean usually means a vacuum leak, low fuel pressure or a "
                                    "clogged injector."))
-            elif mean > 700 and per10 < 1:
+            elif mean > nm.limit("o2", "stuck_rich_above") and per10 < 1:
                 out.append(Finding(PROBLEM, "Running rich (O2 stuck high)",
                                    f"O2 averaged {mean:.0f} mV.",
                                    "Rich usually means a leaking injector, high fuel pressure, "
@@ -233,15 +264,22 @@ def analyze(history, params, window=LIVE_WINDOW_S):
         if not vals or not running:
             continue
         m = _median(vals)
-        if m >= 150:
-            out.append(Finding(PROBLEM if kind == "long-term" else WATCH,
+        key = "blm" if kind == "long-term" else "int"
+        lo, hi = nm.get(key)["low"], nm.get(key)["high"]
+        at_limit = kind == "long-term" and (m >= nm.limit("blm", "prom_max") - 2
+                                            or m <= nm.limit("blm", "prom_min") + 1)
+        if m > hi:
+            out.append(Finding(PROBLEM if at_limit else WATCH,
                                f"ECM adding lots of fuel ({kind} trim {m:.0f})",
-                               "128 means no correction; well above 128 means it's correcting "
-                               "for lean.", "Points to a vacuum leak or low fuel pressure."))
-        elif m <= 106:
-            out.append(Finding(PROBLEM if kind == "long-term" else WATCH,
+                               f"128 means no correction; healthy is {lo}–{hi}. Above that it's "
+                               "correcting for lean"
+                               + (" and is at the stock PROM's limit." if at_limit else "."),
+                               "Points to a vacuum leak or low fuel pressure."))
+        elif m < lo or at_limit:
+            out.append(Finding(PROBLEM if at_limit else WATCH,
                                f"ECM pulling lots of fuel ({kind} trim {m:.0f})",
-                               "Well below 128 means it's correcting for rich.",
+                               f"128 means no correction; healthy is {lo}–{hi}. Below that it's "
+                               "correcting for rich.",
                                "Points to a leaking injector, high fuel pressure or a bad "
                                "sensor reading."))
 

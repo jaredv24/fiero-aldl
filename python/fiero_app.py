@@ -31,6 +31,9 @@ import aldl160
 import aldl_logger as al
 import analysis
 import claude_assistant
+import derived
+import guided_tests
+import normals
 import cable_check
 
 APP_NAME = "Fiero ALDL"
@@ -38,6 +41,8 @@ RES_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.environ.get("FIERO_ALDL_DATA") or os.path.join(
     os.path.expanduser("~"), "Documents", APP_NAME)
 LOG_DIR = os.path.join(DATA_DIR, "logs")
+TESTS_DIR = os.path.join(DATA_DIR, "tests")
+BASELINE_PATH = os.path.join(DATA_DIR, "baseline.json")
 LAYOUT_PATH = os.path.join(DATA_DIR, "my_layout.json")
 CABLE_SETTINGS = os.path.join(DATA_DIR, "cable_settings.json")
 # GM data stream A29 (Fiero 2.8 V6, ECM 1227170). The demo uses the same layout.
@@ -52,6 +57,7 @@ CHART_COLORS = ("#2a6fdb", "#d1495b", "#2e9e5b")
 
 def setup_data_dir():
     os.makedirs(LOG_DIR, exist_ok=True)
+    os.makedirs(TESTS_DIR, exist_ok=True)
     if not os.path.exists(LAYOUT_PATH) or _is_blank_layout(LAYOUT_PATH):
         shutil.copyfile(TEMPLATE_DEF, LAYOUT_PATH)
     cable_check.SETTINGS = CABLE_SETTINGS
@@ -247,10 +253,10 @@ class App:
             side="right")
         self.live_btn = ttk.Button(top, text="Back to live", command=self.analysis_back_to_live)
         ttk.Label(an_tab, foreground="#666", wraplength=950, text=(
-            "Checks readings against typical ranges for GM engines of this era (not factory "
-            "Fiero specs) and explains what's usually behind anything out of the norm. It "
-            "points where to look; it isn't a diagnosis. Checks run only for values that "
-            "are mapped and in real units.")).pack(fill="x", pady=(4, 6))
+            "Checks readings against researched normal values for the Fiero 2.8 V6 (GM chart "
+            "values where available, otherwise GM figures for this era or Fiero owner "
+            "reports) and explains what's usually behind anything out of the norm. It points "
+            "where to look; it isn't a diagnosis.")).pack(fill="x", pady=(4, 6))
         self.an_text = tk.Text(an_tab, wrap="word", font=("Helvetica", 13), padx=12, pady=10,
                                background="white", relief="flat", cursor="arrow")
         self.an_text.pack(fill="both", expand=True)
@@ -261,6 +267,8 @@ class App:
             self.an_text.tag_configure(sev, foreground=color,
                                        font=("Helvetica", 13, "bold"))
         self.an_text.tag_configure("title", font=("Helvetica", 14, "bold"))
+        self.an_text.tag_configure("calc_k", lmargin1=24, font=("Helvetica", 13, "bold"))
+        self.an_text.tag_configure("calc_v", font=("Menlo", 13))
         self.an_text.tag_configure("detail", lmargin1=24, lmargin2=24)
         self.an_text.tag_configure("hint", lmargin1=24, lmargin2=24, foreground="#444",
                                    font=("Helvetica", 13, "italic"))
@@ -268,6 +276,7 @@ class App:
         self.an_log = None       # (name, findings) when showing a saved log
         self.an_last = None
 
+        self._build_tests_tab()
         self._build_claude_tab()
 
         # Raw bytes
@@ -598,6 +607,8 @@ class App:
         while self.history and elapsed - self.history[0][0] > CHART_SECONDS:
             self.history.popleft()
         self.update_raw(frame)
+        if self.runner is not None and not self.runner.done:
+            self.runner.feed(elapsed, values)
         if self.recording:
             _, writer, names, _, _ = self.recording
             writer.writerow([datetime.now().isoformat(timespec="milliseconds"), f"{elapsed:.2f}"]
@@ -646,6 +657,12 @@ class App:
                 side="left", anchor="s", pady=(0, 6))
             bar = ttk.Progressbar(box, maximum=1000, mode="determinate")
             bar.pack(fill="x", pady=(4, 2))
+            nkey = normals.DASHBOARD.get(p["name"])
+            if nkey and p["offset"] is not None:
+                nv = normals.get(nkey)
+                ttk.Label(box, foreground="#777", font=("Helvetica", 11),
+                          text=f"normal {normals.range_text(nkey)} · {nv.get('short', '')}"
+                          ).pack(anchor="w")
             if p["offset"] is None:
                 ttk.Label(box, text="not mapped yet", foreground="#999").pack(anchor="w")
             self.tiles[p["name"]] = {"value": value, "bar": bar}
@@ -718,23 +735,34 @@ class App:
     def params_by_name(self):
         return {p["name"]: p for p in self.definition["parameters"]}
 
+    def baseline_baro(self):
+        try:
+            with open(BASELINE_PATH, encoding="utf-8") as f:
+                return json.load(f).get("baro_map_v")
+        except (OSError, ValueError):
+            return None
+
     def refresh_analysis(self):
         try:
             if self.an_log is None:
                 if self.history:
-                    findings = analysis.analyze(list(self.history), self.params_by_name())
+                    hist = list(self.history)
+                    findings = analysis.analyze(hist, self.params_by_name())
+                    self.an_calc = derived.calculated(hist, self.baseline_baro())
                     title = f"Live: last {analysis.LIVE_WINDOW_S} seconds"
                 else:
                     findings = [analysis.Finding(
                         analysis.INFO, "No data yet",
                         "Connect to the car (or the demo) and checks will appear here.")]
                     title = "Live"
+                    self.an_calc = []
                 self.show_findings(title, findings)
         finally:
             self.root.after(2000, self.refresh_analysis)
 
     def show_findings(self, title, findings):
-        key = (title, [(f.severity, f.title, f.detail) for f in findings])
+        calc = getattr(self, "an_calc", []) or []
+        key = (title, [(f.severity, f.title, f.detail) for f in findings], calc)
         if key == self.an_last:
             return
         self.an_last = key
@@ -750,6 +778,12 @@ class App:
             if f.hint:
                 t.insert("end", f.hint + "\n", "hint")
             t.insert("end", "\n")
+        if calc:
+            t.insert("end", "Calculated from the data\n", "title")
+            for label, value, note in calc:
+                t.insert("end", f"{label}: ", "calc_k")
+                t.insert("end", f"{value}\n", "calc_v")
+                t.insert("end", note + "\n", "hint")
         t.configure(state="disabled")
 
     def analyze_log_file(self, path=None):
@@ -764,6 +798,7 @@ class App:
             messagebox.showerror(APP_NAME, f"Couldn't read that log:\n{e}")
             return
         findings = analysis.analyze(hist, params, window=None)
+        self.an_calc = derived.calculated(hist, self.baseline_baro())
         secs = hist[-1][0] - hist[0][0] if hist else 0
         self.an_log = path
         self.an_last = None
@@ -775,6 +810,230 @@ class App:
         self.an_log = None
         self.an_last = None
         self.live_btn.pack_forget()
+
+    # ------------------------------------------------------------ Tests
+
+    def _build_tests_tab(self):
+        tab = ttk.Frame(self.nb, padding=10)
+        self.tests_tab = tab
+        self.nb.add(tab, text="Tests")
+        self.runner = None
+        self.test_results = {}          # test id -> (name, Result, history)
+        left = ttk.Frame(tab)
+        left.pack(side="left", fill="y")
+        ttk.Label(left, text="Guided tests", font=("Helvetica", 14, "bold")).pack(anchor="w")
+        self.test_tree = ttk.Treeview(left, show="tree", height=18, selectmode="browse")
+        self.test_tree.column("#0", width=250)
+        self.test_tree.pack(fill="y", expand=True, pady=(6, 0))
+        groups = {}
+        for t in guided_tests.ALL_TESTS:
+            if t.condition not in groups:
+                groups[t.condition] = self.test_tree.insert("", "end", text=t.condition, open=True)
+            self.test_tree.insert(groups[t.condition], "end", iid=t.id, text=t.name)
+        self.test_tree.bind("<<TreeviewSelect>>", lambda e: self.show_test())
+
+        right = ttk.Frame(tab, padding=(16, 0, 0, 0))
+        right.pack(side="left", fill="both", expand=True)
+        self.test_title = ttk.Label(right, font=("Helvetica", 16, "bold"))
+        self.test_title.pack(anchor="w")
+        self.test_cond = ttk.Label(right, foreground="#666")
+        self.test_cond.pack(anchor="w")
+        self.test_summary = ttk.Label(right, wraplength=640, justify="left")
+        self.test_summary.pack(anchor="w", pady=(6, 8), fill="x")
+        btns = ttk.Frame(right)
+        btns.pack(fill="x")
+        self.test_start = ttk.Button(btns, text="Start test", command=self.start_test)
+        self.test_start.pack(side="left")
+        self.test_next = ttk.Button(btns, text="Next step", command=self.next_test_step)
+        self.test_next.pack(side="left", padx=6)
+        self.test_finish = ttk.Button(btns, text="Finish", command=self.finish_test)
+        self.test_finish.pack(side="left")
+        self.test_cancel = ttk.Button(btns, text="Cancel", command=self.cancel_test)
+        self.test_cancel.pack(side="left", padx=6)
+        self.test_ask = ttk.Button(btns, text="Ask Claude about this result",
+                                   command=self.ask_claude_about_test)
+        self.test_ask.pack(side="right")
+        self.test_progress = ttk.Label(right, font=("Helvetica", 13, "bold"), foreground="#b45309")
+        self.test_progress.pack(anchor="w", pady=(10, 4))
+        self.test_text = tk.Text(right, wrap="word", font=("Helvetica", 13), padx=12, pady=10,
+                                 background="white", relief="flat", height=16, cursor="arrow")
+        self.test_text.pack(fill="both", expand=True)
+        for sev, color in ((guided_tests.PASS, "#1e8449"), (guided_tests.WATCH, "#b9770e"),
+                           (guided_tests.FAIL, "#c0392b"), (guided_tests.INCONCLUSIVE, "#5d6d7e")):
+            self.test_text.tag_configure(sev, foreground=color, font=("Helvetica", 14, "bold"))
+        self.test_text.tag_configure("cur", background="#fff2a8", font=("Helvetica", 13, "bold"))
+        self.test_text.tag_configure("done", foreground="#999")
+        self.test_text.tag_configure("h", font=("Helvetica", 13, "bold"), spacing1=6)
+        self.test_text.tag_configure("li", lmargin1=14, lmargin2=26)
+        self.test_text.configure(state="disabled")
+        self.test_tree.selection_set(guided_tests.ALL_TESTS[0].id)
+        self.show_test()
+        self.root.after(250, self.test_tick)
+
+    def selected_test(self):
+        sel = self.test_tree.selection()
+        return next((t for t in guided_tests.ALL_TESTS if sel and t.id == sel[0]), None)
+
+    def _test_buttons(self):
+        running = self.runner is not None and not self.runner.done
+        self.test_start.configure(state="disabled" if running else "normal")
+        for b in (self.test_next, self.test_finish, self.test_cancel):
+            b.configure(state="normal" if running else "disabled")
+        t = self.selected_test()
+        self.test_ask.configure(state="normal" if (t and t.id in self.test_results
+                                                   and not running) else "disabled")
+
+    def show_test(self):
+        if self.runner is not None and not self.runner.done:
+            return
+        t = self.selected_test()
+        if t is None:
+            return
+        self.test_title.configure(text=t.name)
+        self.test_cond.configure(text=f"{t.condition} · {len(t.steps)} step"
+                                      f"{'s' if len(t.steps) > 1 else ''}")
+        self.test_summary.configure(text=t.summary)
+        self.test_progress.configure(text="")
+        self.render_test_text(t, None, self.test_results.get(t.id, (None, None, None))[1])
+        self._test_buttons()
+
+    def render_test_text(self, test, current_step, result):
+        tx = self.test_text
+        tx.configure(state="normal")
+        tx.delete("1.0", "end")
+        tx.insert("end", "Steps\n", "h")
+        for i, step in enumerate(test.steps):
+            tag = ("cur" if i == current_step
+                   else "done" if current_step is not None and i < current_step else "li")
+            tx.insert("end", f"{i + 1}. {step.text}\n", (tag, "li") if tag != "li" else "li")
+        if result is not None:
+            tx.insert("end", "\nResult\n", "h")
+            tx.insert("end", f" {result.status.upper()} ", result.status)
+            tx.insert("end", f"  {result.headline}\n", "h")
+            for line in result.details:
+                tx.insert("end", f"• {line}\n", "li")
+        tx.configure(state="disabled")
+
+    def start_test(self):
+        t = self.selected_test()
+        if t is None:
+            return
+        if self.reader is None:
+            messagebox.showinfo(APP_NAME, "Connect to the car (or the demo) first, then start "
+                                          "the test.")
+            return
+        now = time.time() - self.t0
+        self.runner = guided_tests.Runner(t, now)
+        self._demo_mode(t.steps[0].demo_mode)
+        self.log(f"Started test: {t.name}")
+        self.render_test_text(t, 0, None)
+        self._test_buttons()
+
+    def _demo_mode(self, mode):
+        src = getattr(self.reader, "src", None) if self.reader else None
+        if src is not None and hasattr(src, "set_mode"):
+            src.set_mode(mode)
+
+    def next_test_step(self):
+        if self.runner and not self.runner.done:
+            self.runner.next_step(time.time() - self.t0)
+            self._after_step_change()
+
+    def finish_test(self):
+        if self.runner and not self.runner.done:
+            self.runner.done = True
+            self._after_step_change()
+
+    def cancel_test(self):
+        if self.runner and not self.runner.done:
+            self.log(f"Cancelled test: {self.runner.test.name}")
+            self.runner = None
+            self._demo_mode("idle")
+            self.show_test()
+
+    def _after_step_change(self):
+        r = self.runner
+        if r.done:
+            self.complete_test()
+        else:
+            self._demo_mode(r.current.demo_mode)
+            self.render_test_text(r.test, r.step, None)
+
+    def test_tick(self):
+        try:
+            r = self.runner
+            if r is not None and not r.done:
+                now = time.time() - self.t0
+                before = r.step
+                r.tick(now)
+                if r.done or r.step != before:
+                    self._after_step_change()
+                else:
+                    left = r.time_left(now)
+                    self.test_progress.configure(
+                        text=f"Step {r.step + 1} of {len(r.test.steps)} · "
+                             f"{int(left // 60)}:{int(left % 60):02d} left · "
+                             f"{len(r.samples)} readings recorded")
+            elif r is not None and r.done and r.samples and getattr(r, "_completed", False) is False:
+                self.complete_test()          # finished by stop_when (e.g. a stall)
+        finally:
+            self.root.after(250, self.test_tick)
+
+    def complete_test(self):
+        r = self.runner
+        if r is None or getattr(r, "_completed", False):
+            return
+        r._completed = True
+        result = r.result(self.params_by_name())
+        hist = [(t, v) for t, v, _s in r.samples]
+        self.test_results[r.test.id] = (r.test.name, result, hist)
+        self._demo_mode("idle")
+        if r.test.id == "koeo" and result.numbers.get("baro_map_v"):
+            try:
+                with open(BASELINE_PATH, "w", encoding="utf-8") as f:
+                    json.dump({"baro_map_v": result.numbers["baro_map_v"],
+                               "saved": datetime.now().isoformat(timespec="seconds")}, f, indent=2)
+            except OSError:
+                pass
+        self.save_test_result(r.test, result, r.samples)
+        self.test_progress.configure(text=f"Finished · {len(r.samples)} readings")
+        self.log(f"Test finished: {r.test.name}: {result.status.upper()} — {result.headline}")
+        self.test_tree.selection_set(r.test.id)
+        self.render_test_text(r.test, None, result)
+        self._test_buttons()
+
+    def save_test_result(self, test, result, samples):
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        path = os.path.join(TESTS_DIR, f"{test.id}-{stamp}.json")
+        rows = [{"t": round(t, 2), "step": s,
+                 **{k: v for k, v in vals.items() if not k.startswith("_")},
+                 "codes": [c for c, _ in vals.get("_codes") or []],
+                 "flags": {k: v for k, v in (vals.get("_flags") or {}).items() if v}}
+                for t, vals, s in samples]
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"test": test.name, "id": test.id, "when": stamp,
+                           "status": result.status, "headline": result.headline,
+                           "details": result.details, "numbers": result.numbers,
+                           "steps": [st.text for st in test.steps], "samples": rows},
+                          f, indent=1, default=str)
+            self.log(f"Saved test result: {path}")
+        except OSError as e:
+            self.log(f"Couldn't save the test result: {e}")
+
+    def recent_results(self):
+        return [(name, res) for name, res, _h in self.test_results.values()]
+
+    def ask_claude_about_test(self):
+        t = self.selected_test()
+        if t is None or t.id not in self.test_results:
+            return
+        name, result, hist = self.test_results[t.id]
+        summary = claude_assistant.summary_for_test(name, result, hist, self.params_by_name(),
+                                                    self.baseline_baro())
+        self.nb.select(self.claude_tab)
+        self.claude_start(f"[test: {name}, {result.status.upper()}] Explain this result.",
+                          claude_assistant.test_question(summary, name))
 
     # -------------------------------------------------------- Ask Claude
 
@@ -918,7 +1177,8 @@ class App:
             messagebox.showinfo(APP_NAME, "No live data yet. Connect to the car (or the demo) "
                                           "first and let it run for half a minute.")
             return
-        summary = claude_assistant.summary_for_live(self.history, self.params_by_name())
+        summary = claude_assistant.summary_for_live(self.history, self.params_by_name(),
+                                                    self.baseline_baro(), self.recent_results())
         self.claude_start(f"[live data: last {len(self.history)} frames] What do you see, and "
                           "what should I check?", claude_assistant.first_question(summary))
 
@@ -929,7 +1189,8 @@ class App:
         if not path:
             return
         try:
-            summary = claude_assistant.summary_for_log(path, self.params_by_name())
+            summary = claude_assistant.summary_for_log(path, self.params_by_name(),
+                                                       self.baseline_baro(), self.recent_results())
         except (OSError, ValueError, KeyError) as e:
             messagebox.showerror(APP_NAME, f"Couldn't read that log:\n{e}")
             return
@@ -1105,8 +1366,19 @@ def self_test(root, app, seconds=4.0):
         result["ok"] = (app.frames >= 3 and shown not in ("--", "") and rows >= 2
                         and bool(analysed) and sdk.startswith("yes")
                         and "Engine RPM:" in summary)
-        print(f"self-test: frames={app.frames} rpm_tile={shown} logged_rows={rows} "
-              f"log_analysis={'yes' if analysed else 'no'} claude_sdk={sdk} "
+        result["line"] = (f"self-test: frames={app.frames} rpm_tile={shown} logged_rows={rows} "
+                          f"log_analysis={'yes' if analysed else 'no'} claude_sdk={sdk}")
+        # Run one guided test end to end through the Tests tab.
+        app.test_tree.selection_set("cold_sensors")
+        app.show_test()
+        app.start_test()
+        root.after(10000, finish_test)
+
+    def finish_test():
+        res = app.test_results.get("cold_sensors")
+        status = res[1].status if res else "not finished"
+        result["ok"] = result["ok"] and status == guided_tests.PASS
+        print(f"{result['line']} guided_test={status} "
               f"-> {'OK' if result['ok'] else 'FAILED'}")
         app.on_close()
 

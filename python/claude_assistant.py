@@ -9,9 +9,12 @@ Needs an Anthropic API key (console.anthropic.com). Usage is billed to that
 key; nothing is sent until the user clicks a button in the app.
 """
 
+import os
 import statistics
 
 import analysis
+import derived
+import normals
 
 MODEL = "claude-opus-5-5"
 EFFORT = "medium"
@@ -47,7 +50,14 @@ looks implausible (for example a possible decoding or sensor fault).
 saying what result would confirm or rule out each cause.
 - Mention safety where it matters (fuel, hot or moving parts, jacking the car).
 - Be concise and use short headings or lists. The reader is on a laptop in the garage.
-"""
+- "Calculated" values are derived by the app (e.g. the true O2 switch rate from the ECM's \
+counter, total fuel correction, the RPM cycle period, what moves first). Guided test \
+results come from step-by-step procedures the owner ran.
+
+Normal values for this engine, with how solid each figure is (GM spec, GM for this \
+era, Fiero owners, or the app's own estimate). Judge readings against these and say \
+which confidence level you're relying on:
+""" + "\n".join(normals.summary_lines()) + "\n"
 
 
 def _fmt(v, dec=2):
@@ -56,7 +66,8 @@ def _fmt(v, dec=2):
     return f"{v:.{dec}f}".rstrip("0").rstrip(".") if dec else f"{v:.0f}"
 
 
-def build_data_summary(history, params, title, findings=None):
+def build_data_summary(history, params, title, findings=None, calculated=None,
+                       test_results=None):
     """Plain-text summary of a history [(t, {name: value, "_codes", "_flags"})]."""
     names = [n for n, p in params.items()
              if p.get("offset", 0) is not None
@@ -87,6 +98,18 @@ def build_data_summary(history, params, title, findings=None):
         for name in flag_rows[-1]:
             share = sum(1 for f in flag_rows if f.get(name)) / len(flag_rows)
             lines.append(f"- {name}: {share:.0%}")
+
+    if calculated:
+        lines.append("\n## Calculated by the app")
+        for label, value, note in calculated:
+            lines.append(f"- {label}: {value}. {note}")
+
+    if test_results:
+        lines.append("\n## Recent guided test results")
+        for name, res in test_results:
+            lines.append(f"- {name}: {res.status.upper()}, {res.headline}")
+            for dl in res.details:
+                lines.append(f"    - {dl}")
 
     if findings:
         lines.append("\n## Rule findings from the app")
@@ -212,16 +235,30 @@ def describe_error(exc):
     return f"{type(exc).__name__}: {exc}"
 
 
-def summary_for_live(history, params):
-    findings = analysis.analyze(list(history), params)
-    return build_data_summary(list(history), params, "Live data (last ~60 s)", findings)
+def summary_for_live(history, params, baro_v=None, test_results=None):
+    hist = list(history)
+    findings = analysis.analyze(hist, params)
+    return build_data_summary(hist, params, "Live data (last ~60 s)", findings,
+                              derived.calculated(hist, baro_v), test_results)
 
 
-def summary_for_log(path, fallback_params):
+def summary_for_log(path, fallback_params, baro_v=None, test_results=None):
     hist, params = analysis.load_log_params(path, fallback=fallback_params)
     findings = analysis.analyze(hist, params, window=None)
-    import os
-    return build_data_summary(hist, params, f"Recorded log {os.path.basename(path)}", findings)
+    return build_data_summary(hist, params, f"Recorded log {os.path.basename(path)}", findings,
+                              derived.calculated(hist, baro_v), test_results)
+
+
+def summary_for_test(test_name, result, history, params, baro_v=None):
+    """Summary of one guided test run: its result plus the data it recorded."""
+    return build_data_summary(history, params, f"Guided test: {test_name}", None,
+                              derived.calculated(history, baro_v), [(test_name, result)])
+
+
+def test_question(summary, test_name):
+    return (f"{summary}\n\nI just ran the \"{test_name}\" test on my Fiero. Explain the result in "
+            "plain terms, say whether you agree with it based on the numbers, and tell me what "
+            "to do next.")
 
 
 def offline_check():
