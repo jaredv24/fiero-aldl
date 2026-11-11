@@ -55,6 +55,31 @@ CHART_SECONDS = 60
 CHART_COLORS = ("#2a6fdb", "#d1495b", "#2e9e5b")
 
 
+INK = "#1b1d21"          # text on the white "paper" panels, in light and dark mode
+
+
+def is_dark_mode(root):
+    """True when macOS is in Dark Mode (Tk draws standard widgets dark then)."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        return bool(int(root.tk.call("::tk::unsupported::MacWindowStyle", "isdark", root)))
+    except (tk.TclError, ValueError):
+        try:
+            out = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"],
+                                 capture_output=True, text=True, timeout=2).stdout
+            return "Dark" in out
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+
+def label_colors(dark):
+    """Colors for text drawn on the window background (not the white panels)."""
+    if dark:
+        return {"muted": "#aab0b8", "warn": "#f0b55a", "bad": "#ff7b6e", "good": "#6fd492"}
+    return {"muted": "#5f6670", "warn": "#a15c00", "bad": "#c0392b", "good": "#1e6b3a"}
+
+
 def setup_data_dir():
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(TESTS_DIR, exist_ok=True)
@@ -160,6 +185,8 @@ class App:
         self.tiles = {}
 
         root.title(APP_NAME)
+        root.update_idletasks()
+        self.c = label_colors(is_dark_mode(root))
         root.geometry("1060x720")
         root.minsize(820, 560)
         self._build_toolbar()
@@ -204,13 +231,13 @@ class App:
         adv = ttk.Frame(self.root, padding=(10, 0, 10, 6))
         adv.pack(fill="x")
         self.hint_var = tk.StringVar()
-        ttk.Label(adv, textvariable=self.hint_var, foreground="#666").pack(side="left")
+        ttk.Label(adv, textvariable=self.hint_var, foreground=self.c["muted"]).pack(side="left")
         self.invert_var = tk.BooleanVar(value=False)
         self.lsb_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(adv, text="LSB first", variable=self.lsb_var).pack(side="right")
         ttk.Checkbutton(adv, text="Invert signal", variable=self.invert_var).pack(
             side="right", padx=(0, 10))
-        ttk.Label(adv, text="Only if the data looks wrong:", foreground="#666").pack(
+        ttk.Label(adv, text="Only if the data looks wrong:", foreground=self.c["muted"]).pack(
             side="right", padx=(0, 8))
 
     def _build_tabs(self):
@@ -220,7 +247,7 @@ class App:
         # Dashboard
         self.dash = ttk.Frame(self.nb, padding=10)
         self.nb.add(self.dash, text="Dashboard")
-        self.banner = ttk.Label(self.dash, foreground="#a15c00", wraplength=900)
+        self.banner = ttk.Label(self.dash, foreground=self.c["warn"], wraplength=900)
         self.banner.pack(fill="x")
         self.ecm_status = ttk.Label(self.dash, font=("Helvetica", 13), wraplength=950)
         self.ecm_status.pack(fill="x", pady=(2, 8))
@@ -252,12 +279,12 @@ class App:
         ttk.Button(top, text="Analyze a saved log…", command=self.analyze_log_file).pack(
             side="right")
         self.live_btn = ttk.Button(top, text="Back to live", command=self.analysis_back_to_live)
-        ttk.Label(an_tab, foreground="#666", wraplength=950, text=(
+        ttk.Label(an_tab, foreground=self.c["muted"], wraplength=950, text=(
             "Checks readings against researched normal values for the Fiero 2.8 V6 (GM chart "
             "values where available, otherwise GM figures for this era or Fiero owner "
             "reports) and explains what's usually behind anything out of the norm. It points "
             "where to look; it isn't a diagnosis.")).pack(fill="x", pady=(4, 6))
-        self.an_text = tk.Text(an_tab, wrap="word", font=("Helvetica", 13), padx=12, pady=10,
+        self.an_text = tk.Text(an_tab, wrap="word", foreground=INK, insertbackground=INK, font=("Helvetica", 13), padx=12, pady=10,
                                background="white", relief="flat", cursor="arrow")
         self.an_text.pack(fill="both", expand=True)
         for sev, color, label in ((analysis.PROBLEM, "#c0392b", "PROBLEM"),
@@ -294,7 +321,7 @@ class App:
         for c, w in zip(cols, (60, 60, 60, 60, 60, 80, 260)):
             self.tree.heading(c, text=c.capitalize())
             self.tree.column(c, width=w, anchor="w" if c == "assigned" else "center")
-        self.tree.tag_configure("changed", background="#fff2a8")
+        self.tree.tag_configure("changed", background="#fff2a8", foreground=INK)
         self.tree.pack(fill="both", expand=True)
         assign = ttk.Frame(raw_tab)
         assign.pack(fill="x", pady=(6, 0))
@@ -307,14 +334,14 @@ class App:
         self.assign_btn.pack(side="left")
         self.clear_btn = ttk.Button(assign, text="Clear", command=self.clear_byte)
         self.clear_btn.pack(side="left", padx=4)
-        self.assign_note = ttk.Label(assign, foreground="#666")
+        self.assign_note = ttk.Label(assign, foreground=self.c["muted"])
         self.assign_note.pack(side="left", padx=10)
 
         # Messages
         log_tab = ttk.Frame(self.nb, padding=10)
         self.log_tab = log_tab
         self.nb.add(log_tab, text="Messages")
-        self.log_text = tk.Text(log_tab, wrap="word", height=10, font=("Menlo", 11),
+        self.log_text = tk.Text(log_tab, wrap="word", foreground=INK, insertbackground=INK, height=10, font=("Menlo", 11),
                                 background="#fafafa")
         self.log_text.pack(fill="both", expand=True)
         self.log_text.configure(state="disabled")
@@ -325,7 +352,7 @@ class App:
         self.status_var = tk.StringVar(value="Not connected")
         ttk.Label(bar, textvariable=self.status_var).pack(side="left")
         self.rec_var = tk.StringVar()
-        ttk.Label(bar, textvariable=self.rec_var, foreground="#c0392b").pack(side="right")
+        ttk.Label(bar, textvariable=self.rec_var, foreground=self.c["bad"]).pack(side="right")
 
     def log(self, text):
         self.log_text.configure(state="normal")
@@ -625,7 +652,7 @@ class App:
         parts = []
         exp = self.definition.get("expected_length")
         if exp and len(frame) != exp:
-            self.ecm_status.configure(foreground="#c0392b", text=(
+            self.ecm_status.configure(foreground=self.c["bad"], text=(
                 f"Frames are {len(frame)} bytes but this ECM sends {exp}: the readings below "
                 "are probably wrong. Re-run Check cable… or try 'Invert signal'."))
             return
@@ -637,7 +664,7 @@ class App:
         for name in ("Park/Neutral", "A/C clutch on", "Diagnostic (shorted) mode"):
             if flags.get(name):
                 parts.append(name)
-        self.ecm_status.configure(foreground="#c0392b" if codes else "#1e5631",
+        self.ecm_status.configure(foreground=self.c["bad"] if codes else self.c["good"],
                                   text="   •   ".join(parts))
 
     def build_tiles(self):
@@ -660,11 +687,11 @@ class App:
             nkey = normals.DASHBOARD.get(p["name"])
             if nkey and p["offset"] is not None:
                 nv = normals.get(nkey)
-                ttk.Label(box, foreground="#777", font=("Helvetica", 11),
+                ttk.Label(box, foreground=self.c["muted"], font=("Helvetica", 11),
                           text=f"normal {normals.range_text(nkey)} · {nv.get('short', '')}"
                           ).pack(anchor="w")
             if p["offset"] is None:
-                ttk.Label(box, text="not mapped yet", foreground="#999").pack(anchor="w")
+                ttk.Label(box, text="not mapped yet", foreground=self.c["muted"]).pack(anchor="w")
             self.tiles[p["name"]] = {"value": value, "bar": bar}
         for c in range(cols):
             self.tile_frame.columnconfigure(c, weight=1)
@@ -836,7 +863,7 @@ class App:
         right.pack(side="left", fill="both", expand=True)
         self.test_title = ttk.Label(right, font=("Helvetica", 16, "bold"))
         self.test_title.pack(anchor="w")
-        self.test_cond = ttk.Label(right, foreground="#666")
+        self.test_cond = ttk.Label(right, foreground=self.c["muted"])
         self.test_cond.pack(anchor="w")
         self.test_summary = ttk.Label(right, wraplength=640, justify="left")
         self.test_summary.pack(anchor="w", pady=(6, 8), fill="x")
@@ -853,16 +880,17 @@ class App:
         self.test_ask = ttk.Button(btns, text="Ask Claude about this result",
                                    command=self.ask_claude_about_test)
         self.test_ask.pack(side="right")
-        self.test_progress = ttk.Label(right, font=("Helvetica", 13, "bold"), foreground="#b45309")
+        self.test_progress = ttk.Label(right, font=("Helvetica", 13, "bold"), foreground=self.c["warn"])
         self.test_progress.pack(anchor="w", pady=(10, 4))
-        self.test_text = tk.Text(right, wrap="word", font=("Helvetica", 13), padx=12, pady=10,
+        self.test_text = tk.Text(right, wrap="word", foreground=INK, insertbackground=INK, font=("Helvetica", 13), padx=12, pady=10,
                                  background="white", relief="flat", height=16, cursor="arrow")
         self.test_text.pack(fill="both", expand=True)
         for sev, color in ((guided_tests.PASS, "#1e8449"), (guided_tests.WATCH, "#b9770e"),
                            (guided_tests.FAIL, "#c0392b"), (guided_tests.INCONCLUSIVE, "#5d6d7e")):
             self.test_text.tag_configure(sev, foreground=color, font=("Helvetica", 14, "bold"))
-        self.test_text.tag_configure("cur", background="#fff2a8", font=("Helvetica", 13, "bold"))
-        self.test_text.tag_configure("done", foreground="#999")
+        self.test_text.tag_configure("cur", background="#fff2a8", foreground=INK,
+                                     font=("Helvetica", 13, "bold"))
+        self.test_text.tag_configure("done", foreground="#8a8f98")
         self.test_text.tag_configure("h", font=("Helvetica", 13, "bold"), spacing1=6)
         self.test_text.tag_configure("li", lmargin1=14, lmargin2=26)
         self.test_text.configure(state="disabled")
@@ -1052,9 +1080,9 @@ class App:
         self.cl_new_btn = ttk.Button(top, text="New conversation", command=self.claude_reset)
         self.cl_new_btn.pack(side="left", padx=4)
         ttk.Button(top, text="API key…", command=self.claude_key_dialog).pack(side="right")
-        self.cl_cost = ttk.Label(top, foreground="#666")
+        self.cl_cost = ttk.Label(top, foreground=self.c["muted"])
         self.cl_cost.pack(side="right", padx=10)
-        ttk.Label(tab, foreground="#666", wraplength=950, text=(
+        ttk.Label(tab, foreground=self.c["muted"], wraplength=950, text=(
             "Sends a summary of your readings (values, trouble codes, ECM status and the "
             "Analysis findings) to Anthropic's Claude API and shows its diagnosis. Needs your "
             "own API key from console.anthropic.com; each question is billed to that key, "
@@ -1062,7 +1090,7 @@ class App:
             "wrong: double-check before replacing parts.")).pack(fill="x", pady=(4, 6))
         box = ttk.Frame(tab)
         box.pack(fill="both", expand=True)
-        self.cl_text = tk.Text(box, wrap="word", font=("Helvetica", 13), padx=12, pady=10,
+        self.cl_text = tk.Text(box, wrap="word", foreground=INK, insertbackground=INK, font=("Helvetica", 13), padx=12, pady=10,
                                background="white", relief="flat")
         sb = ttk.Scrollbar(box, command=self.cl_text.yview)
         self.cl_text.configure(yscrollcommand=sb.set)
