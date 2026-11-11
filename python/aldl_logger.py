@@ -125,9 +125,10 @@ def find_port():
     if len(found) == 1:
         return found[0].device
     if not found:
-        sys.exit("No Arduino found. Is it plugged in? Run with --list-ports to see all ports.")
+        sys.exit("No USB cable or Arduino found. Is it plugged in? "
+                 "(--list-ports shows every port.)")
     sys.exit("More than one possible port:\n  " + "\n  ".join(p.device for p in found)
-             + "\nPick one with --port.")
+             + "\nPick one from the Port list (or with --port).")
 
 
 class SerialSource:

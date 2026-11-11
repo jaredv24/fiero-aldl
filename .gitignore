@@ -5,3 +5,6 @@ arduino/test/test_decoder
 logs/*
 !logs/.gitkeep
 python/cable_settings.json
+python/build/
+python/dist/
+*.spec

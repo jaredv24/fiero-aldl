@@ -15,20 +15,51 @@ stream, ECM 1227170). It reads the ECM through either a **ready-made USB ALDL ca
  Fiero ALDL ──► Arduino (decodes 160 baud) ──USB─► Mac: aldl_logger.py ─────────► dashboard + CSV
 ```
 
+## The Mac app
+
+**Fiero ALDL.app** puts everything in one window:
+
+- **Connect to:** USB ALDL cable, the Arduino interface, or a demo with a fake hunting idle
+- **Check cable…** finds the settings your cable needs (key ON) and saves them
+- **Dashboard:** big live readouts for RPM, IAC, MAP, O2, trims, coolant and more
+- **Chart:** the last 60 seconds of any three values, stacked, for watching the idle hunt
+- **Raw bytes:** every byte the ECM sends; select one, pick what it is (RPM, TPS, …) and
+  click **Assign** to build the byte layout
+- **Record:** saves a CSV log plus a raw capture you can send to Claude
+
+Your logs, byte layout (`my_layout.json`) and cable settings are kept in
+**Documents → Fiero ALDL**.
+
+### Download and first open
+
+1. Open the repo's **Releases** page (or the latest **Actions → Build Mac app** run) and
+   download the zip for your Mac: **apple-silicon** for M1 and newer, **intel** for older
+   Macs ( → About This Mac shows which you have).
+2. Double-click the zip, then drag **Fiero ALDL** into **Applications**.
+3. The app isn't signed by Apple, so the first time macOS blocks it. Double-click it, click
+   **Done** on the warning, then open **System Settings → Privacy & Security**, scroll down
+   and click **Open Anyway** next to "Fiero ALDL" (on older macOS: right-click the app →
+   **Open** → **Open**). After that it opens normally.
+
+To run it from source instead: `python fiero_app.py` in the `python` folder
+(needs `pip install pyserial`).
+
 ## Folder layout
 
 | Path | What it is |
 |---|---|
 | `arduino/aldl160/` | Arduino sketch (`aldl160.ino`) and the decoder (`aldl_decoder.h`) |
 | `arduino/test/` | PC test for the decoder |
-| `python/aldl_logger.py` | Dashboard, logger, raw-byte viewer, signal checker |
+| `python/fiero_app.py` | The desktop app (window, dashboard, chart, raw bytes, recording) |
+| `.github/workflows/build-mac-app.yml` | Builds `Fiero ALDL.app` on GitHub's Macs |
+| `python/aldl_logger.py` | Command-line dashboard, logger, raw-byte viewer, signal checker |
 | `python/aldl160.py` | 160 baud decoding for USB cables (`--cable`) |
 | `python/cable_check.py` | Tests a USB cable and finds the settings that work |
 | `run_mac.command` | Double-click menu for the Mac |
 | `python/definitions/` | Byte layouts: `1227170_template.json` (car), `demo.json` (simulator) |
 | `WIRING.md` | Parts list, circuit, and safety checks |
 
-## On a Mac (easiest)
+## On a Mac without the app (command line)
 
 Double-click **`run_mac.command`** and pick from the menu. The first run sets itself up
 (needs internet), and it finds the Arduino's port automatically. Logs go in the `logs` folder.

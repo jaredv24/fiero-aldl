@@ -1,0 +1,69 @@
+name: Build Mac app
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # needed to attach the app to a release on version tags
+
+jobs:
+  build:
+    name: Mac app (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: apple-silicon
+          - runner: macos-15-intel
+            arch: intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      FIERO_ALDL_DATA: ${{ github.workspace }}/selftest-data
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: python -m pip install pyserial pyinstaller
+
+      - name: Unit tests
+        working-directory: python
+        run: python -m unittest test_aldl_logger test_cable -v
+
+      - name: App self-test (from source)
+        working-directory: python
+        run: python fiero_app.py --self-test
+
+      - name: Build Fiero ALDL.app
+        working-directory: python
+        run: >
+          pyinstaller --noconfirm --windowed
+          --name "Fiero ALDL"
+          --osx-bundle-identifier io.github.jaredv24.fieroaldl
+          --add-data "definitions:definitions"
+          fiero_app.py
+
+      - name: App self-test (built app)
+        run: '"python/dist/Fiero ALDL.app/Contents/MacOS/Fiero ALDL" --self-test'
+
+      - name: Zip the app
+        run: ditto -c -k --keepParent "python/dist/Fiero ALDL.app" "Fiero-ALDL-${{ matrix.arch }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Fiero-ALDL-${{ matrix.arch }}
+          path: Fiero-ALDL-${{ matrix.arch }}.zip
+
+      - name: Attach to release (version tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Fiero-ALDL-${{ matrix.arch }}.zip
