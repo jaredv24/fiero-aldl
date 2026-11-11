@@ -9,3 +9,4 @@ python/build/
 python/dist/
 *.spec
 /public/
+/website/public/
