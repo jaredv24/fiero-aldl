@@ -37,11 +37,11 @@ jobs:
           python-version: "3.12"
 
       - name: Install build tools
-        run: python -m pip install pyserial pyinstaller
+        run: python -m pip install -r python/requirements.txt pyinstaller
 
       - name: Unit tests
         working-directory: python
-        run: python -m unittest test_aldl_logger test_cable test_analysis -v
+        run: python -m unittest test_aldl_logger test_cable test_analysis test_claude_assistant -v
 
       - name: App self-test (from source)
         working-directory: python
@@ -54,6 +54,9 @@ jobs:
           --name "Fiero ALDL"
           --osx-bundle-identifier io.github.jaredv24.fieroaldl
           --add-data "definitions:definitions"
+          --collect-submodules anthropic
+          --collect-submodules keyring
+          --copy-metadata keyring
           fiero_app.py
 
       - name: App self-test (built app)

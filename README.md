@@ -31,12 +31,29 @@ stream, ECM 1227170). It reads the ECM through either a **ready-made USB ALDL ca
   mode left on) with what usually causes each one. Works live
   (last 30 s) or on a saved log. Limits are typical GM ranges of the era, not factory Fiero
   specs, so treat findings as where to look, not a diagnosis.
+- **Ask Claude:** sends a summary of your readings (live, or a saved log) to Claude and
+  shows its diagnosis, with follow-up questions in the same conversation (see below)
 - **Raw bytes:** every byte the ECM sends, with what each one is; you can reassign bytes
   if something ever looks wrong
 - **Record:** saves a CSV log plus a raw capture you can send to Claude
 
 Your logs, byte layout (`my_layout.json`) and cable settings are kept in
 **Documents → Fiero ALDL**.
+
+### Ask Claude (optional)
+
+The **Ask Claude** tab sends Claude (model `claude-opus-5-5`) a compact summary of the data:
+min/median/max of each value, a time series (up to 240 rows), trouble codes, ECM status flags
+and the Analysis findings. The answer streams in; ask follow-ups below it.
+
+- **Needs your own Anthropic API key**: create one at console.anthropic.com → API keys, then
+  click **API key…** in the tab. The key is stored in the **macOS Keychain**, not in a file.
+  (An `ANTHROPIC_API_KEY` environment variable also works.)
+- **Billed to that key**, separately from any Claude subscription. Each answer shows its rough
+  cost; a question about a minute of data is usually a few cents.
+- **Nothing is sent** until you click a button, and only engine data is sent.
+- Claude can be wrong. Treat its answer like advice from a knowledgeable friend: verify before
+  buying parts.
 
 ### Download and first open
 
@@ -50,7 +67,7 @@ Your logs, byte layout (`my_layout.json`) and cable settings are kept in
    **Open** → **Open**). After that it opens normally.
 
 To run it from source instead: `python fiero_app.py` in the `python` folder
-(needs `pip install pyserial`).
+(needs `pip install -r requirements.txt`).
 
 ## Folder layout
 
@@ -61,6 +78,7 @@ To run it from source instead: `python fiero_app.py` in the `python` folder
 | `python/fiero_app.py` | The desktop app (window, dashboard, chart, raw bytes, recording) |
 | `.github/workflows/build-mac-app.yml` | Builds `Fiero ALDL.app` on GitHub's Macs |
 | `python/analysis.py` | The checks behind the Analysis tab |
+| `python/claude_assistant.py` | The Ask Claude tab's data summary and Claude API calls |
 | `python/aldl_logger.py` | Command-line dashboard, logger, raw-byte viewer, signal checker |
 | `python/aldl160.py` | 160 baud decoding for USB cables (`--cable`) |
 | `python/cable_check.py` | Tests a USB cable and finds the settings that work |
@@ -245,7 +263,7 @@ You can type these in the Arduino Serial Monitor at 115200 baud:
 ## Tests
 
 ```bash
-cd python && python -m unittest test_aldl_logger test_cable test_analysis -v
+cd python && python -m unittest test_aldl_logger test_cable test_analysis test_claude_assistant -v
 ```
 
 ```bash

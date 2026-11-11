@@ -30,6 +30,7 @@ from tkinter import filedialog, messagebox, ttk
 import aldl160
 import aldl_logger as al
 import analysis
+import claude_assistant
 import cable_check
 
 APP_NAME = "Fiero ALDL"
@@ -266,6 +267,8 @@ class App:
         self.an_text.configure(state="disabled")
         self.an_log = None       # (name, findings) when showing a saved log
         self.an_last = None
+
+        self._build_claude_tab()
 
         # Raw bytes
         raw_tab = ttk.Frame(self.nb, padding=10)
@@ -549,6 +552,14 @@ class App:
                     pass
                 elif kind == "check_done":
                     self.check_finished(payload)
+                elif kind == "claude_text":
+                    self.claude_stream_text(payload)
+                elif kind == "claude_done":
+                    self.claude_finished(*payload)
+                elif kind == "claude_error":
+                    self.cl_linebuf = ""
+                    self.claude_write("\n\n" + payload + "\n", "error")
+                    self.claude_set_busy(False)
         except queue.Empty:
             pass
         self.root.after(100, self.poll)
@@ -765,6 +776,227 @@ class App:
         self.an_last = None
         self.live_btn.pack_forget()
 
+    # -------------------------------------------------------- Ask Claude
+
+    def _build_claude_tab(self):
+        tab = ttk.Frame(self.nb, padding=10)
+        self.claude_tab = tab
+        self.nb.add(tab, text="Ask Claude")
+        top = ttk.Frame(tab)
+        top.pack(fill="x")
+        self.cl_live_btn = ttk.Button(top, text="Ask about live data",
+                                      command=self.claude_ask_live)
+        self.cl_live_btn.pack(side="left")
+        self.cl_log_btn = ttk.Button(top, text="Ask about a saved log…",
+                                     command=self.claude_ask_log)
+        self.cl_log_btn.pack(side="left", padx=4)
+        self.cl_new_btn = ttk.Button(top, text="New conversation", command=self.claude_reset)
+        self.cl_new_btn.pack(side="left", padx=4)
+        ttk.Button(top, text="API key…", command=self.claude_key_dialog).pack(side="right")
+        self.cl_cost = ttk.Label(top, foreground="#666")
+        self.cl_cost.pack(side="right", padx=10)
+        ttk.Label(tab, foreground="#666", wraplength=950, text=(
+            "Sends a summary of your readings (values, trouble codes, ECM status and the "
+            "Analysis findings) to Anthropic's Claude API and shows its diagnosis. Needs your "
+            "own API key from console.anthropic.com; each question is billed to that key, "
+            "usually a few cents. Nothing is sent until you click a button. Claude can be "
+            "wrong: double-check before replacing parts.")).pack(fill="x", pady=(4, 6))
+        box = ttk.Frame(tab)
+        box.pack(fill="both", expand=True)
+        self.cl_text = tk.Text(box, wrap="word", font=("Helvetica", 13), padx=12, pady=10,
+                               background="white", relief="flat")
+        sb = ttk.Scrollbar(box, command=self.cl_text.yview)
+        self.cl_text.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        self.cl_text.pack(side="left", fill="both", expand=True)
+        self.cl_text.tag_configure("you", foreground="#2a6fdb",
+                                   font=("Helvetica", 13, "bold"))
+        self.cl_text.tag_configure("note", foreground="#666", font=("Helvetica", 12, "italic"))
+        self.cl_text.tag_configure("error", foreground="#c0392b")
+        self.cl_text.tag_configure("h", font=("Helvetica", 15, "bold"), spacing1=6)
+        self.cl_text.tag_configure("b", font=("Helvetica", 13, "bold"))
+        self.cl_text.tag_configure("li", lmargin1=12, lmargin2=28)
+        self.cl_linebuf = ""
+        self.cl_text.configure(state="disabled")
+        bottom = ttk.Frame(tab)
+        bottom.pack(fill="x", pady=(6, 0))
+        ttk.Label(bottom, text="Follow-up:").pack(side="left")
+        self.cl_entry = ttk.Entry(bottom)
+        self.cl_entry.pack(side="left", fill="x", expand=True, padx=6)
+        self.cl_entry.bind("<Return>", lambda e: self.claude_send_followup())
+        self.cl_send_btn = ttk.Button(bottom, text="Send", command=self.claude_send_followup)
+        self.cl_send_btn.pack(side="left")
+        self.claude_conv = None
+        self.claude_busy = False
+        self.claude_write("Ask Claude to look at your live data or a saved log. "
+                          "Then ask follow-up questions below.\n", "note")
+
+    def claude_write(self, text, tag=None):
+        t = self.cl_text
+        t.configure(state="normal")
+        t.insert("end", text, tag or ())
+        t.see("end")
+        t.configure(state="disabled")
+
+    def claude_stream_text(self, chunk):
+        """Show streamed markdown, formatting each line once it's complete."""
+        self.cl_linebuf += chunk
+        while "\n" in self.cl_linebuf:
+            line, self.cl_linebuf = self.cl_linebuf.split("\n", 1)
+            self.claude_md_line(line)
+
+    def claude_md_line(self, line, end="\n"):
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            self.claude_write(stripped.lstrip("#").strip() + end, "h")
+            return
+        tags = ()
+        if stripped[:2] in ("- ", "* "):
+            line, tags = "• " + stripped[2:], ("li",)
+        elif stripped[:1].isdigit() and ". " in stripped[:4]:
+            line, tags = stripped, ("li",)
+        parts = line.split("**")
+        for i, part in enumerate(parts):   # odd parts were between ** markers
+            if part:
+                self.claude_write(part, tags + (("b",) if i % 2 else ()))
+        self.claude_write(end, tags)
+
+    def claude_set_busy(self, busy):
+        self.claude_busy = busy
+        state = "disabled" if busy else "normal"
+        for b in (self.cl_live_btn, self.cl_log_btn, self.cl_new_btn, self.cl_send_btn):
+            b.configure(state=state)
+
+    def claude_api_key(self):
+        return os.environ.get("ANTHROPIC_API_KEY") or claude_assistant.load_api_key()
+
+    def claude_start(self, shown, prompt):
+        if self.claude_busy:
+            return
+        key = self.claude_api_key()
+        if not key:
+            if messagebox.askyesno(APP_NAME, "Ask Claude needs an Anthropic API key "
+                                   "(from console.anthropic.com). Add one now?"):
+                self.claude_key_dialog()
+            return
+        if self.claude_conv is None:
+            try:
+                self.claude_conv = claude_assistant.Conversation(api_key=key)
+            except Exception as e:  # SDK missing or bad configuration
+                messagebox.showerror(APP_NAME, f"Couldn't start the Claude client:\n{e}")
+                return
+        self.claude_set_busy(True)
+        self.claude_write(f"\nYou: {shown}\n", "you")
+        self.claude_write("Claude is thinking… (this can take a minute)\n\n", "note")
+        conv = self.claude_conv
+
+        def work():
+            try:
+                result = conv.ask(prompt, lambda chunk: self.q.put(("claude_text", chunk)))
+                self.q.put(("claude_done", result))
+            except Exception as e:
+                self.q.put(("claude_error", claude_assistant.describe_error(e)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def claude_finished(self, answer, stop_reason, cost):
+        if self.cl_linebuf:
+            self.claude_md_line(self.cl_linebuf, end="")
+            self.cl_linebuf = ""
+        if stop_reason == "refusal":
+            self.claude_write("\n\n(Claude declined to answer this one.)\n", "note")
+        elif stop_reason == "max_tokens":
+            self.claude_write("\n\n(The answer was cut off for length. Ask it to continue.)\n",
+                              "note")
+        self.claude_write("\n")
+        self.cl_cost.configure(text=f"Last answer ≈ ${cost:.3f}   •   this conversation ≈ "
+                                    f"${self.claude_conv.total_cost:.2f}")
+        self.claude_set_busy(False)
+
+    def claude_ask_live(self):
+        if not self.history:
+            messagebox.showinfo(APP_NAME, "No live data yet. Connect to the car (or the demo) "
+                                          "first and let it run for half a minute.")
+            return
+        summary = claude_assistant.summary_for_live(self.history, self.params_by_name())
+        self.claude_start(f"[live data: last {len(self.history)} frames] What do you see, and "
+                          "what should I check?", claude_assistant.first_question(summary))
+
+    def claude_ask_log(self):
+        path = filedialog.askopenfilename(
+            title="Choose a log for Claude", initialdir=LOG_DIR,
+            filetypes=[("CSV logs", "*.csv"), ("All files", "*")])
+        if not path:
+            return
+        try:
+            summary = claude_assistant.summary_for_log(path, self.params_by_name())
+        except (OSError, ValueError, KeyError) as e:
+            messagebox.showerror(APP_NAME, f"Couldn't read that log:\n{e}")
+            return
+        self.claude_start(f"[log: {os.path.basename(path)}] What do you see, and what should "
+                          "I check?", claude_assistant.first_question(summary))
+
+    def claude_send_followup(self):
+        text = self.cl_entry.get().strip()
+        if not text or self.claude_busy:
+            return
+        if self.claude_conv is None or not self.claude_conv.messages:
+            messagebox.showinfo(APP_NAME, "Start with 'Ask about live data' or 'Ask about a "
+                                          "saved log' so Claude has the readings.")
+            return
+        self.cl_entry.delete(0, "end")
+        self.claude_start(text, text)
+
+    def claude_reset(self):
+        if self.claude_busy:
+            return
+        self.claude_conv = None
+        self.cl_cost.configure(text="")
+        self.claude_write("\n— New conversation —\n", "note")
+
+    def claude_key_dialog(self):
+        win = tk.Toplevel(self.root)
+        win.title("Anthropic API key")
+        win.transient(self.root)
+        frm = ttk.Frame(win, padding=14)
+        frm.pack(fill="both", expand=True)
+        have = bool(claude_assistant.load_api_key())
+        ttk.Label(frm, wraplength=420, text=(
+            "Create a key at console.anthropic.com (Settings → API keys) and paste it below. "
+            "It's stored in your Mac's Keychain, not in a file. "
+            + ("A key is saved already." if have else "No key is saved yet."))).pack(
+            fill="x", pady=(0, 8))
+        var = tk.StringVar()
+        entry = ttk.Entry(frm, textvariable=var, show="•", width=48)
+        entry.pack(fill="x")
+        entry.focus_set()
+        row = ttk.Frame(frm)
+        row.pack(fill="x", pady=(10, 0))
+
+        def save():
+            key = var.get().strip()
+            if not key:
+                return
+            try:
+                claude_assistant.save_api_key(key)
+            except Exception as e:
+                messagebox.showerror(APP_NAME, f"Couldn't save the key to the Keychain:\n{e}",
+                                     parent=win)
+                return
+            self.claude_conv = None   # next question uses the new key
+            win.destroy()
+
+        def remove():
+            claude_assistant.delete_api_key()
+            self.claude_conv = None
+            win.destroy()
+
+        ttk.Button(row, text="Save", command=save).pack(side="right")
+        ttk.Button(row, text="Cancel", command=win.destroy).pack(side="right", padx=6)
+        if have:
+            ttk.Button(row, text="Remove saved key", command=remove).pack(side="left")
+        entry.bind("<Return>", lambda e: save())
+
     # ---------------------------------------------------------- raw bytes
 
     def update_raw(self, frame):
@@ -858,10 +1090,23 @@ def self_test(root, app, seconds=4.0):
         app._draw_chart()
         app.analyze_log_file(csv_path)
         analysed = app.an_title.cget("text").startswith("Log:") and app.an_last
+        try:
+            import anthropic  # noqa: F401  (must be bundled in the app)
+            import keyring
+            backend = type(keyring.get_keyring()).__module__
+            # On a Mac the Keychain backend must be bundled, not keyring's do-nothing one.
+            ok_backend = sys.platform != "darwin" or backend.endswith("macOS")
+            streamed = claude_assistant.offline_check() == "offline check ok"
+            sdk = (f"{'yes' if ok_backend and streamed else 'no'} (keyring: {backend}, "
+                   f"offline stream: {'ok' if streamed else 'FAILED'})")
+        except Exception as e:
+            sdk = f"no ({e})"
+        summary = claude_assistant.summary_for_live(app.history, app.params_by_name())
         result["ok"] = (app.frames >= 3 and shown not in ("--", "") and rows >= 2
-                        and bool(analysed))
+                        and bool(analysed) and sdk.startswith("yes")
+                        and "Engine RPM:" in summary)
         print(f"self-test: frames={app.frames} rpm_tile={shown} logged_rows={rows} "
-              f"log_analysis={'yes' if analysed else 'no'} "
+              f"log_analysis={'yes' if analysed else 'no'} claude_sdk={sdk} "
               f"-> {'OK' if result['ok'] else 'FAILED'}")
         app.on_close()
 
