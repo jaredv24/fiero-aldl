@@ -40,7 +40,7 @@ Your logs, byte layout (`my_layout.json`) and cable settings are kept in
 
 ### Download and first open
 
-1. Open the repo's **Releases** page (or the latest **Actions → Build Mac app** run) and
+1. Open the **[Releases page](https://github.com/jaredv24/fiero-aldl/releases/latest)** and
    download the zip for your Mac: **apple-silicon** for M1 and newer, **intel** for older
    Macs ( → About This Mac shows which you have).
 2. Double-click the zip, then drag **Fiero ALDL** into **Applications**.

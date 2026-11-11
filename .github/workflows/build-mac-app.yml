@@ -5,9 +5,14 @@ on:
     branches: ["**"]
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Publish a release with this tag (e.g. v0.1.0). Leave empty to just build."
+        required: false
+        default: ""
 
 permissions:
-  contents: write  # needed to attach the app to a release on version tags
+  contents: write  # needed to create the release and its tag
 
 jobs:
   build:
@@ -62,8 +67,32 @@ jobs:
           name: Fiero-ALDL-${{ matrix.arch }}
           path: Fiero-ALDL-${{ matrix.arch }}.zip
 
-      - name: Attach to release (version tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          files: Fiero-ALDL-${{ matrix.arch }}.zip
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: Fiero ALDL ${{ inputs.release_tag || github.ref_name }}
+          files: dist/*.zip
+          body: |
+            Mac app for reading live data from a 1985-88 Pontiac Fiero 2.8 V6 (ECM 1227170,
+            GM data stream A29) through a 160 baud USB ALDL cable or the DIY Arduino interface.
+
+            **Download** the zip for your Mac:
+            - `Fiero-ALDL-apple-silicon.zip`: M1 and newer
+            - `Fiero-ALDL-intel.zip`: older Intel Macs
+
+            Unzip, drag **Fiero ALDL** to Applications. The app isn't signed by Apple: the first
+            time, open it, click Done, then System Settings > Privacy & Security > **Open Anyway**.
+
+            Not yet tested on a real car; readings follow GM's A29 specification. See the README.
