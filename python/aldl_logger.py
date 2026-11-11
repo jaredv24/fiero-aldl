@@ -251,7 +251,12 @@ class SimSource:
         rpm = 1150 - 550 * phase + random.uniform(-25, 25)
         iac = 15 + 80 * phase
         coolant_f = min(195.0, 70 + t * 3)
-        o2_mv = 450 + 400 * math.sin(t * 3.0)
+        # A narrowband O2 sensor reads a flat ~450 mV until it's hot; once the ECM
+        # is in closed loop it flips between lean (~100-200 mV) and rich (~700-850 mV).
+        if coolant_f >= 160:
+            o2_mv = 470 + 360 * math.tanh(3 * math.sin(t * 3.0))
+        else:
+            o2_mv = 450 + random.uniform(-12, 12)
         map_v = 1.3 + 0.3 * phase
         spark_deg = 12 + 6 * phase
         warm = coolant_f >= 160
