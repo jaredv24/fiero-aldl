@@ -1,0 +1,24 @@
+{
+  "name": "1988 Fiero 2.8 V6 (ECM 1227170) - TEMPLATE",
+  "notes": [
+    "IMPORTANT: the byte offsets are deliberately left as null. They have NOT been verified for this ECM.",
+    "Fill in each 'offset' (0 = first byte after sync) from a published 1227170 / 160 baud ALDL data stream definition,",
+    "or work them out with:  python aldl_logger.py --port <PORT> --mode raw",
+    "The scale/add values are typical GM conversions and must also be checked against the definition you use.",
+    "value = raw * scale + add.  Use \"size\": 2 for two-byte values (big-endian)."
+  ],
+  "parameters": [
+    {"name": "Engine RPM",        "offset": null, "scale": 25,     "add": 0,     "units": "rpm", "decimals": 0, "range": [0, 2000]},
+    {"name": "Coolant temp",      "offset": null, "scale": 1,      "add": 0,     "units": "raw", "decimals": 0, "range": [0, 255]},
+    {"name": "TPS",               "offset": null, "scale": 0.0196, "add": 0,     "units": "V",   "decimals": 2, "range": [0, 5]},
+    {"name": "MAP",               "offset": null, "scale": 1,      "add": 0,     "units": "raw", "decimals": 0, "range": [0, 255]},
+    {"name": "O2 sensor",         "offset": null, "scale": 4.44,   "add": 0,     "units": "mV",  "decimals": 0, "range": [0, 1000]},
+    {"name": "IAC position",      "offset": null, "scale": 1,      "add": 0,     "units": "steps", "decimals": 0, "range": [0, 160]},
+    {"name": "BLM (long trim)",   "offset": null, "scale": 1,      "add": 0,     "units": "",    "decimals": 0, "range": [100, 156]},
+    {"name": "INT (short trim)",  "offset": null, "scale": 1,      "add": 0,     "units": "",    "decimals": 0, "range": [100, 156]},
+    {"name": "Spark advance",     "offset": null, "scale": 0.352,  "add": 0,     "units": "deg", "decimals": 1, "range": [0, 45]},
+    {"name": "Battery",           "offset": null, "scale": 0.1,    "add": 0,     "units": "V",   "decimals": 1, "range": [10, 16]},
+    {"name": "Trouble codes 1",   "offset": null, "scale": 1,      "add": 0,     "units": "bits", "decimals": 0},
+    {"name": "Trouble codes 2",   "offset": null, "scale": 1,      "add": 0,     "units": "bits", "decimals": 0}
+  ]
+}

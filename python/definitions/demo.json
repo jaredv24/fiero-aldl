@@ -1,0 +1,16 @@
+{
+  "name": "DEMO layout (simulator only - not the real ECM)",
+  "notes": "Used by --simulate. Do not use this with the car; use 1227170_template.json once the offsets are filled in.",
+  "parameters": [
+    {"name": "Engine RPM",        "offset": 0, "scale": 25,     "add": 0,     "units": "rpm", "decimals": 0, "range": [0, 2000]},
+    {"name": "Coolant temp",      "offset": 1, "scale": 1.8,    "add": -40,   "units": "F",   "decimals": 0, "range": [-40, 250]},
+    {"name": "TPS",               "offset": 2, "scale": 0.0196, "add": 0,     "units": "V",   "decimals": 2, "range": [0, 5]},
+    {"name": "MAP",               "offset": 3, "scale": 0.369,  "add": 10.35, "units": "kPa", "decimals": 1, "range": [10, 105]},
+    {"name": "O2 sensor",         "offset": 4, "scale": 4.44,   "add": 0,     "units": "mV",  "decimals": 0, "range": [0, 1000]},
+    {"name": "IAC position",      "offset": 5, "scale": 1,      "add": 0,     "units": "steps", "decimals": 0, "range": [0, 160]},
+    {"name": "BLM (long trim)",   "offset": 6, "scale": 1,      "add": 0,     "units": "",    "decimals": 0, "range": [100, 156]},
+    {"name": "INT (short trim)",  "offset": 7, "scale": 1,      "add": 0,     "units": "",    "decimals": 0, "range": [100, 156]},
+    {"name": "Spark advance",     "offset": 8, "scale": 0.352,  "add": 0,     "units": "deg", "decimals": 1, "range": [0, 45]},
+    {"name": "Battery",           "offset": 9, "scale": 0.1,    "add": 0,     "units": "V",   "decimals": 1, "range": [10, 16]}
+  ]
+}

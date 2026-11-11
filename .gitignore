@@ -1,0 +1,3 @@
+__pycache__/
+*.pyc
+arduino/test/test_decoder
