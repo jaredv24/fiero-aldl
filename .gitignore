@@ -8,5 +8,3 @@ python/cable_settings.json
 python/build/
 python/dist/
 *.spec
-/public/
-/website/public/

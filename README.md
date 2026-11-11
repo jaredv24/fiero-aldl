@@ -71,10 +71,9 @@ To run it from source instead: `python fiero_app.py` in the `python` folder
 
 ## Website
 
-`website/` is a one-page site with a live in-browser demo of the app (simulated data), ready
-for Vercel: import this repository in Vercel and deploy. The top-level `vercel.json` tells
-Vercel it's a static site served from `website/` (no framework, no build step), so the default
-project settings work. Every push to `main` redeploys it.
+`website/` is a one-page site with a live in-browser demo of the app (simulated data). It's
+published with GitHub Pages at **https://jaredv24.github.io/fiero-aldl/** by
+`.github/workflows/pages.yml`; every push to `main` that changes `website/` redeploys it.
 
 ## Folder layout
 
@@ -91,7 +90,7 @@ project settings work. Every push to `main` redeploys it.
 | `python/cable_check.py` | Tests a USB cable and finds the settings that work |
 | `run_mac.command` | Double-click menu for the Mac |
 | `python/definitions/1227170_fiero_v6.json` | Fiero 2.8 V6 byte layout from GM data stream A29 (also used by the demo) |
-| `website/` | Landing page with a live demo, deployed on Vercel |
+| `website/` | Landing page with a live demo, published with GitHub Pages |
 | `WIRING.md` | Parts list, circuit, and safety checks |
 
 ## On a Mac without the app (command line)
