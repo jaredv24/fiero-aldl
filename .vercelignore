@@ -1,0 +1,5 @@
+# Only the website is deployed; keep the app's code out of Vercel's build.
+/python
+/arduino
+/run_mac.command
+/WIRING.md

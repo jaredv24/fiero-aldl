@@ -72,8 +72,9 @@ To run it from source instead: `python fiero_app.py` in the `python` folder
 ## Website
 
 `website/` is a one-page site with a live in-browser demo of the app (simulated data), ready
-for Vercel: import this repository in Vercel and set **Root Directory** to `website`. There's
-no build step; every push to `main` redeploys it.
+for Vercel: import this repository in Vercel and deploy. The top-level `vercel.json` tells
+Vercel it's a static site served from `website/` (no framework, no build step), so the default
+project settings work. Every push to `main` redeploys it.
 
 ## Folder layout
 
