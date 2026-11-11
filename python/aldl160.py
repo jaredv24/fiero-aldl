@@ -4,7 +4,7 @@ How a USB cable is read
 -----------------------
 A typical 160 baud ALDL cable is a USB-serial chip whose receive line is wired
 to ALDL pin E. The ECM sends one bit every 6.25 ms as a pulse: short = 0,
-long = 1. If the serial port is opened at a much higher baud (2400 by default),
+long = 1. If the serial port is opened at a much higher baud (4800 by default),
 each time the line goes low the serial chip "receives" one byte. The longer the
 line stayed low, the more zero bits that byte starts with (serial bytes arrive
 least-significant bit first), and a low lasting longer than a whole byte comes
@@ -16,7 +16,8 @@ Depending on the cable, the low periods are either the ALDL pulses themselves
 transistor). cable_check.py finds out which applies to your cable.
 
 Status: tested against a simulated serial chip, not a real cable yet.
-  - Normal cables: works in simulation at 2400 and 4800 baud.
+  - Normal cables: works in simulation at 4800 baud across GM's full timing
+    range; 2400 can miss GM's shortest (0.2 ms) pulses.
   - Inverted cables: EXPERIMENTAL. Short pulses can slip between the serial
     chip's samples, so bits get lost. How well it works depends on the
     real cable's chip; a capture from cable_check.py is needed to fix it.
@@ -24,9 +25,13 @@ Status: tested against a simulated serial chip, not a real cable yet.
 
 import time
 
-BIT_PERIOD_US = 6250        # 160 baud
-THRESHOLD_US = BIT_PERIOD_US / 2
-DEFAULT_CABLE_BAUD = 2400
+# GM 160 baud spec: a 0 bit is low 0.2-1.4 ms, a 1 bit is low 2.4-5.7 ms,
+# receivers sample at 1.5-2.3 ms. Bits are 6.25 ms apart.
+BIT_PERIOD_US = 6250
+THRESHOLD_US = 1900
+# 4800: a 0.2 ms pulse (GM's shortest) is still caught; at 2400 the serial chip
+# checks the start bit 0.21 ms in and can miss it.
+DEFAULT_CABLE_BAUD = 4800
 
 
 class Decoder160:
@@ -110,10 +115,12 @@ def low_time_us(byte, baud):
 def byte_to_bit(byte, baud, invert=False):
     """Turn one received serial byte into one ALDL bit."""
     t = low_time_us(byte, baud)
-    long_low = t is None or t > THRESHOLD_US
-    # Normal: the low period IS the pulse, long = 1.
-    # Inverted: the low period is the gap after the pulse, long gap = short pulse = 0.
-    return 0 if long_low == invert else 1
+    if not invert:
+        # The low period IS the pulse: long = 1.
+        return 1 if t is None or t > THRESHOLD_US else 0
+    # Inverted: the low period is the gap after the pulse. A 1 leaves a gap of
+    # 0.55-3.85 ms, a 0 leaves 4.85-6.05 ms.
+    return 0 if t is None or t > BIT_PERIOD_US - THRESHOLD_US else 1
 
 
 def byte_to_bits(byte, baud, invert=False):

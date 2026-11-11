@@ -110,6 +110,44 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn("RPM dropping close to stalling",
                       titles(an.analyze(h, params(), window=None)))
 
+    def test_trouble_codes_diag_mode_and_open_loop(self):
+        def coded(t):
+            v = healthy(t)
+            v["_codes"] = [(32, "Exhaust gas recirculation (EGR) failure")]
+            v["_flags"] = {"Closed loop": False, "Diagnostic (shorted) mode": True,
+                           "A/C clutch on": True}
+            return v
+        f = an.analyze(history(coded), params())
+        t = titles(f)
+        self.assertIn("ECM trouble code 32: Exhaust gas recirculation (EGR) failure", t)
+        self.assertIn("ECM is in diagnostic (A–B shorted) mode", t)
+        self.assertIn("ECM in open loop on a warm engine", t)
+        self.assertIn("A/C compressor running", t)
+        self.assertFalse(any("O2" in x and "switching" in x for x in t))  # skipped in open loop
+
+    def test_codes_and_flags_survive_csv(self):
+        d = al.load_definition(al.DEFAULT_DEF)
+        frame = bytearray(al.SimSource().frame(100.0))
+        frame[12] |= 0x20        # code 32
+        frame[14] &= 0x7F        # open loop
+        rows = al.decode(bytes(frame), d)
+        codes, flags = al.decode_status(bytes(frame), d)
+        path = os.path.join(tempfile.mkdtemp(), "log.csv")
+        import csv
+        with open(path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["time", "elapsed_s"] + [al.column_name(p) for p in d["parameters"]]
+                       + ["trouble_codes", "status_flags", "raw_hex"])
+            for i in range(30):
+                w.writerow(["x", i * 0.5] + [f"{v:.3f}" for _, v, _, _ in rows]
+                           + [al.codes_text(codes), al.flags_text(flags), "00"])
+        h, p = an.load_log_params(path)
+        self.assertEqual(h[0][1]["_codes"], [(32, "Exhaust gas recirculation (EGR) failure")])
+        self.assertFalse(h[0][1]["_flags"]["Closed loop"])
+        t = titles(an.analyze(h, p, window=None))
+        self.assertIn("ECM trouble code 32: Exhaust gas recirculation (EGR) failure", t)
+        self.assertIn("ECM in open loop on a warm engine", t)
+
     def test_load_log_round_trip(self):
         d = al.load_definition(al.DEMO_DEF)
         sim = al.SimSource()

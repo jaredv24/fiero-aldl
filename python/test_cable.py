@@ -25,13 +25,17 @@ def aldl_bits(frames):
     return bits + [1] * 9
 
 
-def waveform(bits, invert, short_us=400, long_us=4400, jitter=150, seed=1):
-    """Line level changes as (time_us, level). Active pulse is low unless inverted."""
+def waveform(bits, invert, seed=1, zero_us=(200, 1400), one_us=(2400, 5700)):
+    """Line level changes as (time_us, level). Active pulse is low unless inverted.
+
+    Pulse lengths are random across GM's 160 baud spec: a 0 is low 0.2-1.4 ms,
+    a 1 is low 2.4-5.7 ms.
+    """
     rnd = random.Random(seed)
     active, idle = (1, 0) if invert else (0, 1)
     t, edges = 20000.0, [(0.0, idle)]
     for bit in bits:
-        on = (long_us if bit else short_us) + rnd.uniform(-jitter, jitter)
+        on = rnd.uniform(*(one_us if bit else zero_us))
         edges.append((t, active))
         edges.append((t + on, idle))
         t += aldl160.BIT_PERIOD_US
@@ -84,8 +88,15 @@ class CableDecodeTests(unittest.TestCase):
         got = aldl160.decode_capture([rx[:100], rx[100:]], baud, invert)
         self.assertEqual(got, self.frames, f"baud={baud} invert={invert}")
 
-    def test_normal_2400(self):
-        self.check(2400, False)
+    def test_normal_2400_with_pulses_above_spec_minimum(self):
+        # 2400 works if the shortest pulses are a bit above GM's 0.2 ms minimum...
+        rx = uart_receive(waveform(aldl_bits(self.frames), False, zero_us=(260, 1400)), 2400)
+        self.assertEqual(aldl160.decode_capture([rx], 2400), self.frames)
+
+    def test_2400_can_miss_the_shortest_pulses(self):
+        # ...but at exactly 0.2 ms the serial chip misses them, hence 4800 by default.
+        rx = uart_receive(waveform(aldl_bits(self.frames), False, zero_us=(200, 205)), 2400)
+        self.assertNotEqual(aldl160.decode_capture([rx], 2400), self.frames)
 
     @unittest.skip("Known limit: with an inverting cable, short pulses can fall between the "
                    "serial chip's samples. Needs a capture from a real inverted cable to solve.")
@@ -96,13 +107,13 @@ class CableDecodeTests(unittest.TestCase):
         self.check(4800, False)
 
     def test_wrong_polarity_gives_nothing_clean(self):
-        rx = uart_receive(waveform(aldl_bits(self.frames), False), 2400)
-        got = aldl160.decode_capture([rx], 2400, invert=True)
+        rx = uart_receive(waveform(aldl_bits(self.frames), False), 4800)
+        got = aldl160.decode_capture([rx], 4800, invert=True)
         self.assertNotEqual(got, self.frames)
 
     def test_gap_resets_partial_frame(self):
-        rx = uart_receive(waveform(aldl_bits(self.frames), False), 2400)
-        got = aldl160.decode_capture([rx[:50], None, rx[50:]], 2400)
+        rx = uart_receive(waveform(aldl_bits(self.frames), False), 4800)
+        got = aldl160.decode_capture([rx[:50], None, rx[50:]], 4800)
         self.assertEqual(got, self.frames[1:])
 
     def test_low_time(self):
@@ -124,7 +135,7 @@ class CableCheckTests(unittest.TestCase):
             best = cable_check.analyse(cable_check.load_capture(path))
         self.assertIsNotNone(best)
         self.assertFalse(best["invert"])
-        self.assertIn(best["baud"], (2400, 4800))
+        self.assertEqual(best["baud"], 4800)
         self.assertEqual(best["length"], 20)
 
 

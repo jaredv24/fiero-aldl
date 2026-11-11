@@ -10,10 +10,12 @@
 //   - Each data byte is sent as a 0 "start" bit followed by 8 data bits.
 //     Because every byte begins with a 0, nine 1s in a row can only be sync.
 //
-// Things that vary or that you may need to confirm on your car (settings below):
-//   - which line level is "active" (low or high)
-//   - the short/long threshold (default: half a bit period)
-//   - bit order inside a byte (default: most significant bit first)
+// GM's spec ("G.M. unidirectional serial data format", 160 baud):
+//   - each bit starts with a high-to-low transition; low = driver on (active-low)
+//   - a 0 bit stays low 0.2-1.4 ms, a 1 bit stays low 2.4-5.7 ms
+//   - the receiver samples at 1.5-2.3 ms; bytes are highest-order bit first
+// The settings below default to that; activeLevel/msbFirst can be flipped for
+// interfaces that invert the signal.
 
 #ifndef ALDL_DECODER_H
 #define ALDL_DECODER_H
@@ -29,7 +31,7 @@ class Aldl160Decoder {
   // Settings (change before use if needed).
   uint8_t activeLevel = 0;        // 0 = active-low, 1 = active-high
   uint32_t bitPeriodUs = 6250;    // 160 baud
-  uint32_t thresholdUs = 3125;    // active pulse longer than this = 1
+  uint32_t thresholdUs = 1900;    // active pulse longer than this = 1 (GM samples 1.5-2.3 ms)
   uint32_t minPulseUs = 150;      // shorter = noise, ignored
   bool msbFirst = true;
 

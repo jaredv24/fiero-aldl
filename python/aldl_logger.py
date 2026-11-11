@@ -26,8 +26,9 @@ import time
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_DEF = os.path.join(HERE, "definitions", "1227170_template.json")
-DEMO_DEF = os.path.join(HERE, "definitions", "demo.json")
+# GM data stream A29: 2.8L L44 (Fiero V6), ECM 1227170. The simulator uses it too.
+DEFAULT_DEF = os.path.join(HERE, "definitions", "1227170_fiero_v6.json")
+DEMO_DEF = DEFAULT_DEF
 
 GREEN, YELLOW, DIM, BOLD, RESET = "\033[32m", "\033[33m", "\033[2m", "\033[1m", "\033[0m"
 
@@ -75,7 +76,20 @@ def load_definition(path):
         p.setdefault("decimals", 1)
         p.setdefault("signed", False)
         p.setdefault("offset", None)
+    d.setdefault("trouble_codes", [])
+    d.setdefault("flags", [])
     return d
+
+
+def _from_table(raw, table):
+    """Linear interpolation in a [[raw, value], ...] table, clamped at the ends."""
+    pts = sorted(table)
+    if raw <= pts[0][0]:
+        return pts[0][1]
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        if raw <= x1:
+            return y0 + (y1 - y0) * (raw - x0) / (x1 - x0)
+    return pts[-1][1]
 
 
 def decode(frame, definition):
@@ -87,8 +101,40 @@ def decode(frame, definition):
             out.append((p["name"], None, p["units"], p))
             continue
         raw = int.from_bytes(frame[off:off + size], "big", signed=p["signed"])
-        out.append((p["name"], raw * p["scale"] + p["add"], p["units"], p))
+        base = _from_table(raw, p["table"]) if p.get("table") else raw
+        out.append((p["name"], base * p["scale"] + p["add"], p["units"], p))
     return out
+
+
+def _bit(frame, item):
+    off = item["offset"]
+    if off >= len(frame):
+        return None
+    on = bool(frame[off] >> item["bit"] & 1)
+    return not on if item.get("invert") else on
+
+
+def decode_status(frame, definition):
+    """Trouble codes and status flags carried in the frame.
+
+    Returns (codes, flags): codes = [(code, text)] currently set,
+    flags = {name: True/False}. Empty when the definition has none.
+    """
+    codes = [(c["code"], c["text"]) for c in definition.get("trouble_codes", [])
+             if _bit(frame, c)]
+    flags = {f["name"]: v for f in definition.get("flags", [])
+             if (v := _bit(frame, f)) is not None}
+    return codes, flags
+
+
+def codes_text(codes):
+    """'32:Exhaust gas recirculation (EGR) failure; 44:Oxygen sensor lean' (for CSV)."""
+    return "; ".join(f"{c}:{t}" for c, t in codes)
+
+
+def flags_text(flags):
+    """'Closed loop=1; Park/Neutral=0' (for CSV)."""
+    return "; ".join(f"{n}={int(v)}" for n, v in flags.items())
 
 
 def column_name(p):
@@ -182,11 +228,13 @@ class ReplaySource:
 class SimSource:
     """Fake ECM that has a hunting idle, for trying the software without a car.
 
-    Frames follow definitions/demo.json, not the real ECM layout.
+    Frames use the real Fiero V6 layout (GM data stream A29), but the numbers are
+    made up: they are not readings from any real car.
     """
 
-    def __init__(self, frame_len=20, interval=0.5):
-        self.frame_len, self.interval = frame_len, interval
+    def __init__(self, interval=0.5):
+        self.interval = interval
+        self.cross = 0
         self.t0 = time.time()
         self.pulse_mode = False
 
@@ -204,22 +252,31 @@ class SimSource:
         iac = 15 + 80 * phase
         coolant_f = min(195.0, 70 + t * 3)
         o2_mv = 450 + 400 * math.sin(t * 3.0)
-        map_kpa = 34 + 8 * phase
+        map_v = 1.3 + 0.3 * phase
         spark_deg = 12 + 6 * phase
-        # Byte values are the inverse of the formulas in definitions/demo.json.
+        warm = coolant_f >= 160
+        self.cross = (self.cross + (3 if warm else 0)) % 256
+        # Byte values are the inverse of the formulas in the A29 definition.
         vals = {
-            0: rpm / 25,
-            1: (coolant_f + 40) / 1.8,
-            2: 0.52 / 0.0196,
-            3: (map_kpa - 10.35) / 0.369,
-            4: o2_mv / 4.44,
-            5: iac,
-            6: 128 + 10 * phase,
-            7: 128 + 6 * math.sin(t),
-            8: spark_deg / 0.352,
-            9: 13.9 / 0.1,
+            0: 0x20 | 0x04,                    # ALDL (10k) mode, reference pulses
+            3: iac,
+            4: (coolant_f + 40) / 1.35,
+            5: 0,                              # parked
+            6: map_v / 0.0196,
+            7: rpm / 25,
+            8: 0.52 / 0.0196,
+            9: 128 + 6 * math.sin(t),
+            10: o2_mv / 4.44,
+            14: (0x80 if warm else 0) | (0x40 if o2_mv > 450 else 0) | 0x02,
+            15: 0x80 | 0x20,                   # in Park, A/C not requested
+            17: 13.9 / 0.1,
+            18: 128 + 10 * phase,
+            19: self.cross,
+            20: spark_deg / 0.3515625,
+            22: 177,                           # about 30 C / 86 F intake air
+            23: 0x05,
         }
-        frame = bytearray(random.randrange(256) for _ in range(self.frame_len))
+        frame = bytearray(25)
         for off, v in vals.items():
             frame[off] = max(0, min(255, int(round(v))))
         return bytes(frame)
@@ -230,7 +287,7 @@ class SimSource:
             if self.pulse_mode:
                 for _ in range(40):
                     bit = random.random() < 0.5
-                    on = (4400 if bit else 420) + random.randint(-150, 150)
+                    on = random.randint(2400, 5700) if bit else random.randint(200, 1400)
                     yield f"P,0,{on}\n"
                     yield f"P,1,{6250 - on}\n"
                 time.sleep(0.25)
@@ -266,7 +323,8 @@ def run_live(src, definition, log_path, capture):
         logf = open(log_path, "w", newline="", encoding="utf-8")
         writer = csv.writer(logf)
         writer.writerow(["time", "elapsed_s"]
-                        + [column_name(p) for p in definition["parameters"]] + ["raw_hex"])
+                        + [column_name(p) for p in definition["parameters"]]
+                        + ["trouble_codes", "status_flags", "raw_hex"])
     t0, frames, status, last = time.time(), 0, "", None
     try:
         for line in src.lines():
@@ -284,11 +342,13 @@ def run_live(src, definition, log_path, capture):
             frames += 1
             elapsed = time.time() - t0
             rows = decode(payload, definition)
+            codes, flags = decode_status(payload, definition)
             if writer:
                 writer.writerow([datetime.now().isoformat(timespec="milliseconds"),
                                  f"{elapsed:.2f}"]
                                 + ["" if v is None else f"{v:.3f}" for _, v, _, _ in rows]
-                                + [payload.hex().upper()])
+                                + [codes_text(codes), flags_text(flags),
+                                   payload.hex().upper()])
                 logf.flush()
             clear()
             print(f"{BOLD}{definition.get('name', 'ALDL')}{RESET}")
@@ -298,6 +358,15 @@ def run_live(src, definition, log_path, capture):
                 rng = p.get("range")
                 b = bar(value, rng[0], rng[1]) if rng else ""
                 print(f"  {name:<24}{fmt_value(value, p):>10} {units:<6} {b}")
+            if definition.get("trouble_codes"):
+                print(f"\n  Trouble codes: "
+                      + (", ".join(f"{c} ({t})" for c, t in codes) if codes else "none"))
+            if flags:
+                print("  Status: " + ", ".join(n for n, v in flags.items() if v))
+            exp = definition.get("expected_length")
+            if exp and len(payload) != exp:
+                print(f"  {YELLOW}Frame is {len(payload)} bytes; this ECM sends {exp}. "
+                      f"Values may be wrong (check --invert / cable settings).{RESET}")
             print()
             print(f"{DIM}raw:{RESET}")
             print("  " + hex_row(payload, last))

@@ -18,12 +18,13 @@ static void addFrame(std::vector<int> &bits, const std::vector<uint8_t> &data, b
 }
 
 // Turn bits into (level, duration) pulses the way the wire would look.
-// Active pulse: 1 -> ~4400us, 0 -> ~400us; rest of the 6250us bit is idle.
+// Active pulse per GM spec: 1 -> 2.4-5.7 ms, 0 -> 0.2-1.4 ms; rest of the 6.25 ms bit idle.
 static void play(Aldl160Decoder &d, const std::vector<int> &bits, uint8_t active,
                  std::vector<std::vector<uint8_t>> &out, int jitter) {
   for (int bit : bits) {
-    int on = bit ? 4400 : 400;
-    if (jitter) on += (rand() % (2 * jitter + 1)) - jitter;
+    int on;
+    if (jitter) on = bit ? 2400 + rand() % 3301 : 200 + rand() % 1201;  // full spec range
+    else on = bit ? 4000 : 800;
     int off = 6250 - on;
     if (d.feedPulse(active, on)) out.push_back(std::vector<uint8_t>(d.frame, d.frame + d.frameLen));
     if (d.feedPulse(!active, off)) out.push_back(std::vector<uint8_t>(d.frame, d.frame + d.frameLen));

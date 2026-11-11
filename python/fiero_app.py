@@ -39,8 +39,9 @@ DATA_DIR = os.environ.get("FIERO_ALDL_DATA") or os.path.join(
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 LAYOUT_PATH = os.path.join(DATA_DIR, "my_layout.json")
 CABLE_SETTINGS = os.path.join(DATA_DIR, "cable_settings.json")
-TEMPLATE_DEF = os.path.join(RES_DIR, "definitions", "1227170_template.json")
-DEMO_DEF = os.path.join(RES_DIR, "definitions", "demo.json")
+# GM data stream A29 (Fiero 2.8 V6, ECM 1227170). The demo uses the same layout.
+TEMPLATE_DEF = os.path.join(RES_DIR, "definitions", "1227170_fiero_v6.json")
+DEMO_DEF = TEMPLATE_DEF
 
 SRC_DEMO, SRC_CABLE, SRC_ARDUINO = "Demo (no car)", "USB ALDL cable", "Arduino interface"
 AUTO_PORT = "Automatic"
@@ -50,10 +51,20 @@ CHART_COLORS = ("#2a6fdb", "#d1495b", "#2e9e5b")
 
 def setup_data_dir():
     os.makedirs(LOG_DIR, exist_ok=True)
-    if not os.path.exists(LAYOUT_PATH):
+    if not os.path.exists(LAYOUT_PATH) or _is_blank_layout(LAYOUT_PATH):
         shutil.copyfile(TEMPLATE_DEF, LAYOUT_PATH)
     cable_check.SETTINGS = CABLE_SETTINGS
     cable_check.LOGS = LOG_DIR
+
+
+def _is_blank_layout(path):
+    """True for the old blank template (nothing mapped): safe to replace."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            params = json.load(f).get("parameters", [])
+    except (OSError, ValueError):
+        return False
+    return bool(params) and all(p.get("offset") is None for p in params)
 
 
 def list_serial_ports():
@@ -203,7 +214,9 @@ class App:
         self.dash = ttk.Frame(self.nb, padding=10)
         self.nb.add(self.dash, text="Dashboard")
         self.banner = ttk.Label(self.dash, foreground="#a15c00", wraplength=900)
-        self.banner.pack(fill="x", pady=(0, 8))
+        self.banner.pack(fill="x")
+        self.ecm_status = ttk.Label(self.dash, font=("Helvetica", 13), wraplength=950)
+        self.ecm_status.pack(fill="x", pady=(2, 8))
         self.tile_frame = ttk.Frame(self.dash)
         self.tile_frame.pack(fill="both", expand=True)
 
@@ -340,7 +353,8 @@ class App:
             text="(the demo uses a fixed layout)" if demo else "")
         self.hint_var.set({
             SRC_DEMO: "Demo: a fake ECM with a hunting idle, no hardware needed.",
-            SRC_CABLE: "USB cable: plug in, key ON, run 'Check cable…' once, then Connect.",
+            SRC_CABLE: ("USB cable: turn its 10k switch ON (ALDL mode), key ON, run "
+                        "'Check cable…' once, then Connect."),
             SRC_ARDUINO: "Arduino: plug in the interface, key ON, then Connect.",
         }[self.source_var.get()])
         self.load_current_definition()
@@ -409,6 +423,7 @@ class App:
         self.byte_stats.clear()
         self.history.clear()
         self.tree.delete(*self.tree.get_children())
+        self.ecm_status.configure(text="")
         self.t0 = time.time()
         self.reader = Reader(self.make_source_factory(), self.q)
         self.reader.start()
@@ -468,7 +483,8 @@ class App:
         self.on_source_change()
         if best:
             msg = (f"Success: clean {best['length']}-byte frames at {best['baud']} baud"
-                   f"{', inverted' if best['invert'] else ''}.\n\nSettings saved. "
+                   f"{', inverted' if best['invert'] else ''}. "
+                   + cable_check.length_note(best["length"]) + "\n\nSettings saved. "
                    "Click Connect, then use the Raw bytes tab.")
             if best["invert"]:
                 msg += ("\n\nNote: inverted cables are experimental. If values look wrong, "
@@ -503,7 +519,7 @@ class App:
         writer = csv.writer(f)
         writer.writerow(["time", "elapsed_s"]
                         + [al.column_name(p) for p in self.definition["parameters"]]
-                        + ["raw_hex"])
+                        + ["trouble_codes", "status_flags", "raw_hex"])
         self.recording = (f, writer, names, cap, csv_path)
         self.record_btn.configure(text="■ Stop")
         self.rec_var.set(f"● Recording to {os.path.basename(csv_path)}")
@@ -554,6 +570,10 @@ class App:
         elapsed = time.time() - self.t0
         rows = al.decode(frame, self.definition)
         values = {name: value for name, value, _, _ in rows}
+        codes, flags = al.decode_status(frame, self.definition)
+        if self.definition.get("trouble_codes") or flags:
+            values["_codes"], values["_flags"] = codes, flags
+        self.show_ecm_status(frame, codes, flags)
         for name, value, units, p in rows:
             tile = self.tiles.get(name)
             if not tile:
@@ -571,7 +591,7 @@ class App:
             _, writer, names, _, _ = self.recording
             writer.writerow([datetime.now().isoformat(timespec="milliseconds"), f"{elapsed:.2f}"]
                             + ["" if values.get(n) is None else f"{values[n]:.3f}" for n in names]
-                            + [frame.hex().upper()])
+                            + [al.codes_text(codes), al.flags_text(flags), frame.hex().upper()])
             self.recording[0].flush()
         self.status_var.set(f"Connected: {self.source_var.get()}   frames: {self.frames}   "
                             f"frame length: {len(frame)} bytes")
@@ -579,18 +599,37 @@ class App:
 
     # -------------------------------------------------------- dashboard
 
+    def show_ecm_status(self, frame, codes, flags):
+        parts = []
+        exp = self.definition.get("expected_length")
+        if exp and len(frame) != exp:
+            self.ecm_status.configure(foreground="#c0392b", text=(
+                f"Frames are {len(frame)} bytes but this ECM sends {exp}: the readings below "
+                "are probably wrong. Re-run Check cable… or try 'Invert signal'."))
+            return
+        if self.definition.get("trouble_codes"):
+            parts.append("Trouble codes: " + (", ".join(f"{c} ({t})" for c, t in codes)
+                                              if codes else "none"))
+        if "Closed loop" in flags:
+            parts.append("Closed loop" if flags["Closed loop"] else "Open loop")
+        for name in ("Park/Neutral", "A/C clutch on", "Diagnostic (shorted) mode"):
+            if flags.get(name):
+                parts.append(name)
+        self.ecm_status.configure(foreground="#c0392b" if codes else "#1e5631",
+                                  text="   •   ".join(parts))
+
     def build_tiles(self):
         for w in self.tile_frame.winfo_children():
             w.destroy()
         self.tiles = {}
         params = [p for p in self.definition["parameters"] if p.get("range")]
-        cols = 3
+        cols = 4
         for i, p in enumerate(params):
             box = ttk.LabelFrame(self.tile_frame, text=p["name"], padding=(10, 4))
             box.grid(row=i // cols, column=i % cols, sticky="nsew", padx=6, pady=6)
             row = ttk.Frame(box)
             row.pack(fill="x")
-            value = ttk.Label(row, text="--", font=("Helvetica", 30, "bold"))
+            value = ttk.Label(row, text="--", font=("Helvetica", 28, "bold"))
             value.pack(side="left")
             ttk.Label(row, text=" " + p["units"], font=("Helvetica", 14)).pack(
                 side="left", anchor="s", pady=(0, 6))

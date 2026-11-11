@@ -1,6 +1,9 @@
 """Rule-based checks that flag readings out of the normal range.
 
 Works on a history of decoded frames: a list of (seconds, {name: value}).
+A sample may also carry "_codes" ([(code, text)] trouble codes set in that
+frame) and "_flags" ({flag name: bool}) when the byte layout defines them
+(the Fiero A29 layout does).
 Used by the app's Analysis tab, live (last 30 s) or on a saved CSV log.
 
 The limits are typical guidelines for GM engines of this era, NOT factory
@@ -78,6 +81,25 @@ def analyze(history, params, window=LIVE_WINDOW_S):
         return [Finding(INFO, "Collecting data…", f"{len(rpm_all)} readings so far.")]
 
     running = _median(rpm_all) > 300
+
+    # ---- Trouble codes and ECM status (from the frame's flag bytes)
+    seen = {}
+    for _, v in history:
+        for code, text in v.get("_codes") or []:
+            seen[code] = text
+    for code in sorted(seen):
+        out.append(Finding(PROBLEM, f"ECM trouble code {code}: {seen[code]}",
+                           "Reported by the ECM in the data stream.",
+                           "Look this code up in the Fiero service manual's diagnostic chart; "
+                           "fix codes first, they often explain the symptoms."))
+    flag_rows = [v["_flags"] for _, v in history if v.get("_flags")]
+    latest_flags = flag_rows[-1] if flag_rows else {}
+    if latest_flags.get("Diagnostic (shorted) mode") or latest_flags.get("Factory test mode"):
+        out.append(Finding(WATCH, "ECM is in diagnostic (A–B shorted) mode",
+                           "In this mode the ECM changes how it runs the engine.",
+                           "Don't judge the idle like this. Use the 10k (ALDL) mode instead: "
+                           "the cable's 10k switch, not a jumper."))
+
     coolant = d.series("Coolant temp", "F")
     warm = coolant is not None and coolant and _median(coolant[-5:]) >= WARM_F
 
@@ -165,9 +187,23 @@ def analyze(history, params, window=LIVE_WINDOW_S):
                                    "If it's above about 1 V the ECM may not know it's idling. "
                                    "Check TPS adjustment or a sticking throttle."))
 
+    # ---- Closed loop and idle load (status flags)
+    recent_flags = flag_rows[-10:]
+    open_loop = bool(running and warm and recent_flags
+                     and all("Closed loop" in f and not f["Closed loop"] for f in recent_flags))
+    if open_loop:
+        out.append(Finding(WATCH, "ECM in open loop on a warm engine",
+                           "It isn't using the O2 sensor to correct fuel.",
+                           "Usually a bad O2 sensor or coolant reading, or it simply hasn't "
+                           "switched yet right after warm-up. Idle fuel control is cruder "
+                           "in open loop."))
+    if idling and any(f.get("A/C clutch on") for f in recent_flags):
+        out.append(Finding(INFO, "A/C compressor running",
+                           "It adds load at idle; compare the idle with the A/C off."))
+
     # ---- O2 sensor (only meaningful warm and running)
     o2 = d.series("O2 sensor", "mV")
-    if o2 and running:
+    if o2 and running and not open_loop:
         if not warm:
             out.append(Finding(INFO, "O2 checks wait for a warm engine",
                                "Needs coolant temp mapped and above 160 °F."))
@@ -255,7 +291,7 @@ def load_log_params(path, fallback=None):
         header = next(csv.reader(f), [])
     params = {}
     for col in header:
-        if col in ("time", "elapsed_s", "raw_hex"):
+        if col in ("time", "elapsed_s", "raw_hex", "trouble_codes", "status_flags"):
             continue
         name, units = _split_column(col)
         if not any(v.get(name) is not None for _, v in hist):
@@ -273,7 +309,7 @@ def load_log(path):
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         cols = [n for n in reader.fieldnames or []
-                if n not in ("time", "elapsed_s", "raw_hex")]
+                if n not in ("time", "elapsed_s", "raw_hex", "trouble_codes", "status_flags")]
         for row in reader:
             try:
                 t = float(row["elapsed_s"])
@@ -287,5 +323,13 @@ def load_log(path):
                     vals[name] = v if math.isfinite(v) else None
                 except (TypeError, ValueError):
                     vals[name] = None
+            if row.get("trouble_codes"):
+                vals["_codes"] = [(int(c), txt) for c, _, txt in
+                                  (x.strip().partition(":")
+                                   for x in row["trouble_codes"].split(";")) if c.isdigit()]
+            if row.get("status_flags"):
+                vals["_flags"] = {n.strip(): v.strip() == "1" for n, _, v in
+                                  (x.partition("=") for x in row["status_flags"].split(";"))
+                                  if n.strip()}
             history.append((t, vals))
     return history

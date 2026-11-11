@@ -1,0 +1,551 @@
+{
+  "name": "Fiero 2.8 V6 (L44, ECM 1227170) - GM data stream A29",
+  "source": "GM 'Data Stream A29 Specification': 2.8L PFI CPC (L44) VIN 9, 1985-88. Data on ALDL pin E, 160 baud, 25 bytes per frame, sent in 10K mode (10k ohm across A-B) or shorted mode. Offsets here are GM's byte number minus 1.",
+  "expected_length": 25,
+  "parameters": [
+    {
+      "name": "Engine RPM",
+      "offset": 7,
+      "scale": 25,
+      "add": 0,
+      "units": "rpm",
+      "decimals": 0,
+      "range": [
+        0,
+        3000
+      ]
+    },
+    {
+      "name": "Coolant temp",
+      "offset": 4,
+      "scale": 1.35,
+      "add": -40,
+      "units": "F",
+      "decimals": 0,
+      "range": [
+        -40,
+        250
+      ],
+      "note": "GM: deg C = N*0.75 - 40, shown here in F"
+    },
+    {
+      "name": "TPS",
+      "offset": 8,
+      "scale": 0.0196,
+      "add": 0,
+      "units": "V",
+      "decimals": 2,
+      "range": [
+        0,
+        5
+      ]
+    },
+    {
+      "name": "MAP",
+      "offset": 6,
+      "scale": 0.0196,
+      "add": 0,
+      "units": "V",
+      "decimals": 2,
+      "range": [
+        0,
+        5
+      ],
+      "note": "GM gives MAP as sensor volts, not kPa"
+    },
+    {
+      "name": "O2 sensor",
+      "offset": 10,
+      "scale": 4.44,
+      "add": 0,
+      "units": "mV",
+      "decimals": 0,
+      "range": [
+        0,
+        1000
+      ]
+    },
+    {
+      "name": "IAC position",
+      "offset": 3,
+      "scale": 1,
+      "add": 0,
+      "units": "steps",
+      "decimals": 0,
+      "range": [
+        0,
+        160
+      ]
+    },
+    {
+      "name": "BLM (long trim)",
+      "offset": 18,
+      "scale": 1,
+      "add": 0,
+      "units": "",
+      "decimals": 0,
+      "range": [
+        100,
+        156
+      ]
+    },
+    {
+      "name": "INT (short trim)",
+      "offset": 9,
+      "scale": 1,
+      "add": 0,
+      "units": "",
+      "decimals": 0,
+      "range": [
+        100,
+        156
+      ]
+    },
+    {
+      "name": "Spark advance",
+      "offset": 20,
+      "scale": 0.3515625,
+      "add": 0,
+      "units": "deg",
+      "decimals": 1,
+      "range": [
+        0,
+        45
+      ],
+      "note": "GM: degrees = N*(90/256)"
+    },
+    {
+      "name": "Battery",
+      "offset": 17,
+      "scale": 0.1,
+      "add": 0,
+      "units": "V",
+      "decimals": 1,
+      "range": [
+        10,
+        16
+      ]
+    },
+    {
+      "name": "Vehicle speed",
+      "offset": 5,
+      "scale": 1,
+      "add": 0,
+      "units": "mph",
+      "decimals": 0,
+      "range": [
+        0,
+        120
+      ]
+    },
+    {
+      "name": "EGR duty cycle",
+      "offset": 21,
+      "scale": 0.390625,
+      "add": 0,
+      "units": "%",
+      "decimals": 0,
+      "range": [
+        0,
+        100
+      ],
+      "note": "GM: % = N/2.56"
+    },
+    {
+      "name": "Manifold air temp",
+      "offset": 22,
+      "scale": 1.8,
+      "add": 32,
+      "units": "F",
+      "decimals": 0,
+      "range": [
+        -40,
+        250
+      ],
+      "table": [
+        [
+          0,
+          200
+        ],
+        [
+          12,
+          150
+        ],
+        [
+          13,
+          145
+        ],
+        [
+          14,
+          140
+        ],
+        [
+          16,
+          135
+        ],
+        [
+          18,
+          130
+        ],
+        [
+          21,
+          125
+        ],
+        [
+          23,
+          120
+        ],
+        [
+          26,
+          115
+        ],
+        [
+          30,
+          110
+        ],
+        [
+          34,
+          105
+        ],
+        [
+          39,
+          100
+        ],
+        [
+          44,
+          95
+        ],
+        [
+          50,
+          90
+        ],
+        [
+          56,
+          85
+        ],
+        [
+          64,
+          80
+        ],
+        [
+          72,
+          75
+        ],
+        [
+          81,
+          70
+        ],
+        [
+          92,
+          65
+        ],
+        [
+          102,
+          60
+        ],
+        [
+          114,
+          55
+        ],
+        [
+          126,
+          50
+        ],
+        [
+          139,
+          45
+        ],
+        [
+          152,
+          40
+        ],
+        [
+          165,
+          35
+        ],
+        [
+          177,
+          30
+        ],
+        [
+          189,
+          25
+        ],
+        [
+          199,
+          20
+        ],
+        [
+          209,
+          15
+        ],
+        [
+          218,
+          10
+        ],
+        [
+          225,
+          5
+        ],
+        [
+          231,
+          0
+        ],
+        [
+          237,
+          -5
+        ],
+        [
+          241,
+          -10
+        ],
+        [
+          245,
+          -15
+        ],
+        [
+          247,
+          -20
+        ],
+        [
+          250,
+          -25
+        ],
+        [
+          251,
+          -30
+        ],
+        [
+          255,
+          -40
+        ]
+      ],
+      "note": "GM lookup table (A/D counts -> deg C), shown here in F"
+    },
+    {
+      "name": "Base pulse width (raw)",
+      "offset": 23,
+      "size": 2,
+      "scale": 1,
+      "add": 0,
+      "units": "",
+      "decimals": 0,
+      "note": "GM: (MSB*256)+LSB; units not given in the spec"
+    },
+    {
+      "name": "O2 cross counter (raw)",
+      "offset": 19,
+      "scale": 1,
+      "add": 0,
+      "units": "",
+      "decimals": 0,
+      "note": "Rolls over 0-255; the change between frames = O2 cross counts"
+    },
+    {
+      "name": "PROM ID",
+      "offset": 1,
+      "size": 2,
+      "scale": 1,
+      "add": 0,
+      "units": "",
+      "decimals": 0
+    }
+  ],
+  "trouble_codes": [
+    {
+      "offset": 11,
+      "bit": 7,
+      "code": 12,
+      "text": "No reference pulses"
+    },
+    {
+      "offset": 11,
+      "bit": 6,
+      "code": 13,
+      "text": "Oxygen sensor"
+    },
+    {
+      "offset": 11,
+      "bit": 5,
+      "code": 14,
+      "text": "Coolant sensor high temp"
+    },
+    {
+      "offset": 11,
+      "bit": 4,
+      "code": 15,
+      "text": "Coolant sensor low temp"
+    },
+    {
+      "offset": 11,
+      "bit": 3,
+      "code": 21,
+      "text": "Throttle position sensor high"
+    },
+    {
+      "offset": 11,
+      "bit": 2,
+      "code": 22,
+      "text": "Throttle position sensor low"
+    },
+    {
+      "offset": 11,
+      "bit": 1,
+      "code": 23,
+      "text": "Manifold air temperature low"
+    },
+    {
+      "offset": 11,
+      "bit": 0,
+      "code": 24,
+      "text": "Vehicle speed sensor"
+    },
+    {
+      "offset": 12,
+      "bit": 7,
+      "code": 25,
+      "text": "Manifold air temperature high"
+    },
+    {
+      "offset": 12,
+      "bit": 6,
+      "code": 31,
+      "text": "Wastegate / high MAP overboost"
+    },
+    {
+      "offset": 12,
+      "bit": 5,
+      "code": 32,
+      "text": "Exhaust gas recirculation (EGR) failure"
+    },
+    {
+      "offset": 12,
+      "bit": 4,
+      "code": 33,
+      "text": "MAP sensor high"
+    },
+    {
+      "offset": 12,
+      "bit": 3,
+      "code": 34,
+      "text": "MAP sensor low"
+    },
+    {
+      "offset": 12,
+      "bit": 2,
+      "code": 35,
+      "text": "Idle air control"
+    },
+    {
+      "offset": 12,
+      "bit": 0,
+      "code": 42,
+      "text": "Electronic spark timing"
+    },
+    {
+      "offset": 13,
+      "bit": 7,
+      "code": 43,
+      "text": "Electronic spark control failure"
+    },
+    {
+      "offset": 13,
+      "bit": 6,
+      "code": 44,
+      "text": "Oxygen sensor lean"
+    },
+    {
+      "offset": 13,
+      "bit": 5,
+      "code": 45,
+      "text": "Oxygen sensor rich"
+    },
+    {
+      "offset": 13,
+      "bit": 4,
+      "code": 51,
+      "text": "PROM missing"
+    },
+    {
+      "offset": 13,
+      "bit": 3,
+      "code": 52,
+      "text": "CAL PACK missing"
+    },
+    {
+      "offset": 13,
+      "bit": 2,
+      "code": 53,
+      "text": "High battery voltage"
+    },
+    {
+      "offset": 13,
+      "bit": 0,
+      "code": 55,
+      "text": "ADU error"
+    }
+  ],
+  "flags": [
+    {
+      "offset": 14,
+      "bit": 7,
+      "name": "Closed loop"
+    },
+    {
+      "offset": 14,
+      "bit": 6,
+      "name": "O2 rich (off = lean)"
+    },
+    {
+      "offset": 14,
+      "bit": 1,
+      "name": "Block learn enabled"
+    },
+    {
+      "offset": 15,
+      "bit": 7,
+      "name": "Park/Neutral"
+    },
+    {
+      "offset": 15,
+      "bit": 5,
+      "name": "A/C requested",
+      "invert": true
+    },
+    {
+      "offset": 15,
+      "bit": 4,
+      "name": "Vacuum switch"
+    },
+    {
+      "offset": 16,
+      "bit": 0,
+      "name": "A/C clutch on"
+    },
+    {
+      "offset": 16,
+      "bit": 5,
+      "name": "Power steering switch"
+    },
+    {
+      "offset": 0,
+      "bit": 5,
+      "name": "ALDL (10k) mode"
+    },
+    {
+      "offset": 0,
+      "bit": 4,
+      "name": "Diagnostic (shorted) mode"
+    },
+    {
+      "offset": 0,
+      "bit": 3,
+      "name": "Factory test mode"
+    },
+    {
+      "offset": 0,
+      "bit": 6,
+      "name": "High battery voltage"
+    }
+  ]
+}

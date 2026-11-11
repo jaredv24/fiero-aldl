@@ -25,7 +25,15 @@ import aldl160
 HERE = os.path.dirname(os.path.abspath(__file__))
 SETTINGS = os.path.join(HERE, "cable_settings.json")
 LOGS = os.path.join(HERE, "..", "logs")
-BAUDS = [2400, 4800, 1200]
+BAUDS = [4800, 2400, 1200]
+FIERO_FRAME_LEN = 25   # GM data stream A29 (Fiero 2.8 V6, ECM 1227170)
+
+
+def length_note(length):
+    if length == FIERO_FRAME_LEN:
+        return "That's the 25-byte frame GM specifies for the Fiero 2.8 V6 (A29). "
+    return (f"Note: the Fiero 2.8 V6 should send {FIERO_FRAME_LEN}-byte frames, not {length}. "
+            "If this is a Fiero V6, values may be wrong; try the other signal polarity. ")
 
 
 def record(port, bauds, seconds):
@@ -136,6 +144,7 @@ def main(argv=None):
             json.dump(settings, f, indent=2)
         print(f"SUCCESS: clean {best['length']}-byte frames at {best['baud']} baud"
               f"{', inverted' if best['invert'] else ''}.")
+        print(length_note(best["length"]))
         if best["invert"]:
             print("Note: inverted cable support is experimental. If values look wrong or")
             print("frames drop out, send the capture file above to Claude.")

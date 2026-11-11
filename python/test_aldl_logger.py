@@ -44,9 +44,56 @@ class DecodeTests(unittest.TestCase):
         self.assertIsNone(rows[1][1])
         self.assertIsNone(rows[2][1])  # offset past end of frame
 
-    def test_template_loads(self):
+    def test_fiero_a29_definition_matches_gm_spec(self):
+        """Byte numbers/formulas from GM data stream A29 (GM byte N = offset N-1)."""
         d = al.load_definition(al.DEFAULT_DEF)
-        self.assertTrue(all(p["offset"] is None for p in d["parameters"]))
+        self.assertEqual(d["expected_length"], 25)
+        frame = bytearray(25)
+        frame[3] = 40            # GM byte 4: IAC position
+        frame[4] = 160           # GM byte 5: coolant, C = N*.75-40 -> 80 C
+        frame[5] = 55            # GM byte 6: MPH = N
+        frame[6] = 100           # GM byte 7: MAP volts = N*.0196
+        frame[7] = 32            # GM byte 8: RPM = N*25
+        frame[8] = 26            # GM byte 9: TPS volts = N*.0196
+        frame[10] = 100          # GM byte 11: O2 mV = N*4.44
+        frame[17] = 140          # GM byte 18: battery = N*.1
+        frame[18] = 131          # GM byte 19: BLM
+        frame[20] = 64           # GM byte 21: spark = N*90/256
+        frame[21] = 128          # GM byte 22: EGR % = N/2.56
+        frame[22] = 152          # GM byte 23: MAT table -> 40 C
+        frame[23], frame[24] = 1, 2  # GM bytes 24-25: base pulse width MSB/LSB
+        v = {n: x for n, x, _, _ in al.decode(bytes(frame), d)}
+        self.assertEqual(v["IAC position"], 40)
+        self.assertAlmostEqual(v["Coolant temp"], 80 * 1.8 + 32)
+        self.assertEqual(v["Vehicle speed"], 55)
+        self.assertAlmostEqual(v["MAP"], 1.96)
+        self.assertEqual(v["Engine RPM"], 800)
+        self.assertAlmostEqual(v["TPS"], 26 * 0.0196)
+        self.assertAlmostEqual(v["O2 sensor"], 444)
+        self.assertAlmostEqual(v["Battery"], 14.0)
+        self.assertEqual(v["BLM (long trim)"], 131)
+        self.assertAlmostEqual(v["Spark advance"], 22.5)
+        self.assertAlmostEqual(v["EGR duty cycle"], 50)
+        self.assertAlmostEqual(v["Manifold air temp"], 40 * 1.8 + 32)
+        self.assertEqual(v["Base pulse width (raw)"], 258)
+
+    def test_fiero_codes_and_flags(self):
+        d = al.load_definition(al.DEFAULT_DEF)
+        frame = bytearray(25)
+        frame[11] = 0x80         # MALFFLG1 bit 7: code 12
+        frame[12] = 0x20         # MALFFLG2 bit 5: code 32 EGR
+        frame[13] = 0x40         # MALFFLG3 bit 6: code 44
+        frame[14] = 0x80         # MWAF1 bit 7: closed loop
+        frame[15] = 0x00         # MCU1IO bit 5 = 0 means A/C requested (inverted)
+        frame[16] = 0x01         # MCU2IO bit 0: A/C clutch
+        codes, flags = al.decode_status(bytes(frame), d)
+        self.assertEqual([c for c, _ in codes], [12, 32, 44])
+        self.assertTrue(flags["Closed loop"])
+        self.assertTrue(flags["A/C requested"])
+        self.assertTrue(flags["A/C clutch on"])
+        self.assertFalse(flags["Park/Neutral"])
+        self.assertEqual(al.codes_text(codes).split(";")[1].strip(),
+                         "32:Exhaust gas recirculation (EGR) failure")
 
 
 class LiveModeTest(unittest.TestCase):

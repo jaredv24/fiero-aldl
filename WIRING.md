@@ -54,7 +54,9 @@ You only need three pins:
 
 ## Getting the data stream
 
-1. Leave B disconnected at first. Many 160 baud ECMs send data on pin E on their own.
+1. GM's data stream spec for the Fiero V6 (A29) lists data in **10K mode** (10 kΩ between
+   A and B) and shorted mode, so plan on closing the 10 kΩ switch. You can try with B
+   disconnected first to see whether your ECM also sends without it.
 2. Run `python aldl_logger.py --port <PORT> --mode pulses` with the key on.
    - **No pulses at all:** try typing `u` (internal pull-up) in the Arduino Serial Monitor,
      or run with the switch closed (10 kΩ between A and B).
