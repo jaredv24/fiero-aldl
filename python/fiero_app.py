@@ -43,6 +43,7 @@ import obd
 import cable_check
 import checks
 import compare
+import history
 import leak_hunt
 import vacuum
 
@@ -331,6 +332,7 @@ class App:
         self._build_tests_tab()
         self._build_leak_tab()
         self._build_checks_tab()
+        self._build_history_tab()
         self._build_claude_tab()
 
         # Raw bytes
@@ -467,6 +469,7 @@ class App:
             self.populate_tests()
         self.update_leak_spots()
         self.refresh_checks()
+        self.refresh_history()
 
     def refresh_ports(self):
         ports = list_serial_ports()
@@ -1297,6 +1300,7 @@ class App:
         self.check_value.delete(0, "end")
         self.check_note.delete(0, "end")
         self.refresh_checks()
+        self.refresh_history()
 
     def delete_check(self):
         sel = self.check_tree.selection()
@@ -1305,6 +1309,61 @@ class App:
         index = self.check_tree.index(sel[0])
         self.checks_store().delete(index)
         self.refresh_checks()
+
+    # ------------------------------------------------------------ History
+
+    def _build_history_tab(self):
+        tab = ttk.Frame(self.nb, padding=10)
+        self.nb.add(tab, text="History")
+        self.hist_title = ttk.Label(tab, font=("Helvetica", 14, "bold"))
+        self.hist_title.pack(anchor="w")
+        ttk.Label(tab, foreground=self.c["muted"], wraplength=950, justify="left", text=(
+            "Every guided test and hands-on check for this car, oldest first. Run the same "
+            "tests after a repair to see what changed.")).pack(anchor="w", pady=(2, 6))
+        cols = ("when", "kind", "name", "status", "summary")
+        self.hist_tree = ttk.Treeview(tab, columns=cols, show="headings", height=12)
+        for c, w, t in (("when", 130, "When"), ("kind", 60, "Type"), ("name", 230, "Test / check"),
+                        ("status", 80, "Result"), ("summary", 480, "Summary")):
+            self.hist_tree.heading(c, text=t)
+            self.hist_tree.column(c, width=w, anchor="w")
+        self.hist_tree.pack(fill="both", expand=True)
+        self.hist_trends = tk.Text(tab, height=8, wrap="word", foreground=INK, background="white",
+                                   relief="flat", font=("Helvetica", 13), padx=10, pady=8)
+        self.hist_trends.pack(fill="x", pady=(8, 0))
+        self.hist_trends.tag_configure("b", font=("Helvetica", 13, "bold"))
+        self.refresh_history()
+
+    def history_events(self):
+        return history.load(TESTS_DIR, CHECKS_DIR, self.vehicle_name(), self.is_obd())
+
+    def history_text(self):
+        return history.text(self.history_events())
+
+    def refresh_history(self):
+        if not hasattr(self, "hist_tree"):
+            return
+        events = self.history_events()
+        self.hist_title.configure(text=f"History: {self.vehicle_name()}  ({len(events)} entries)")
+        self.hist_tree.delete(*self.hist_tree.get_children())
+        for ev in events:
+            self.hist_tree.insert("", "end", values=(
+                ev.when.strftime("%Y-%m-%d %H:%M") if ev.when.year > 1 else "?", ev.kind,
+                ev.name, ev.status.upper(), ev.summary))
+        if events:
+            self.hist_tree.see(self.hist_tree.get_children()[-1])
+        t = self.hist_trends
+        t.configure(state="normal")
+        t.delete("1.0", "end")
+        changes, trends = history.status_changes(events), history.trends(events)
+        if not changes and not trends:
+            t.insert("end", "Trends show up here once a test or check has been done more than once.")
+        for name, a, b, wa, wb in changes:
+            t.insert("end", f"{name}: ", "b")
+            t.insert("end", f"{a.upper()} on {wa:%b %d} → {b.upper()} on {wb:%b %d}\n")
+        for name, k, a, b, n, wa, wb in trends:
+            t.insert("end", f"{name} ({k}): ", "b")
+            t.insert("end", f"{a:g} → {b:g} over {n} runs ({wa:%b %d} to {wb:%b %d})\n")
+        t.configure(state="disabled")
 
     # ------------------------------------------------------------ Leak hunt
 
@@ -1602,11 +1661,13 @@ class App:
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({"test": test.name, "id": test.id, "when": stamp,
+                           "vehicle": self.vehicle_name(),
                            "status": result.status, "headline": result.headline,
                            "details": result.details, "numbers": result.numbers,
                            "steps": [st.text for st in test.steps], "samples": rows},
                           f, indent=1, default=str)
             self.log(f"Saved test result: {path}")
+            self.refresh_history()
         except OSError as e:
             self.log(f"Couldn't save the test result: {e}")
 
@@ -1793,7 +1854,7 @@ class App:
 
     def extra_context(self):
         """Hands-on checks, leak hunt and comparison results, for Claude."""
-        parts = [x for x in (self.checks_store().text(), self.leak_hunt_text(),
+        parts = [x for x in (self.history_text(), self.leak_hunt_text(),
                              self.compare_text()) if x]
         return ("\n\n" + "\n\n".join(parts)) if parts else ""
 
