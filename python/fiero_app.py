@@ -44,6 +44,7 @@ import cable_check
 import checks
 import compare
 import history
+import report
 import leak_hunt
 import vacuum
 
@@ -55,6 +56,7 @@ LOG_DIR = os.path.join(DATA_DIR, "logs")
 TESTS_DIR = os.path.join(DATA_DIR, "tests")
 VEHICLES_DIR = os.path.join(DATA_DIR, "vehicles")
 CHECKS_DIR = os.path.join(DATA_DIR, "checks")
+REPORTS_DIR = os.path.join(DATA_DIR, "reports")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 BASELINE_PATH = os.path.join(DATA_DIR, "baseline.json")
 LAYOUT_PATH = os.path.join(DATA_DIR, "my_layout.json")
@@ -253,7 +255,8 @@ class App:
         ttk.Label(adv, text="Vehicle:").pack(side="left")
         ttk.Label(adv, textvariable=self.vehicle_var, font=("Helvetica", 13, "bold")).pack(
             side="left", padx=(4, 6))
-        ttk.Button(adv, text="Vehicles…", command=self.open_vehicles).pack(side="left", padx=(0, 12))
+        ttk.Button(adv, text="Vehicles…", command=self.open_vehicles).pack(side="left", padx=(0, 6))
+        ttk.Button(adv, text="Save report", command=self.save_report).pack(side="left", padx=(0, 12))
         self.hint_var = tk.StringVar()
         ttk.Label(adv, textvariable=self.hint_var, foreground=self.c["muted"]).pack(side="left")
         self.invert_var = tk.BooleanVar(value=False)
@@ -1310,6 +1313,67 @@ class App:
         self.checks_store().delete(index)
         self.refresh_checks()
 
+    # ------------------------------------------------------------ Report
+
+    def report_data(self):
+        hist = list(self.history)
+        prof = self.vehicle_profile()
+        if hist:
+            if self.is_obd():
+                found = obd_analysis.analyze(hist, prof, window=None)
+            else:
+                found = analysis.analyze(hist, self.params_by_name(), window=None)
+            found = found + vacuum.findings(hist)
+        else:
+            found = []
+        names = [v.get() for v, _cb in self.chart_vars if v.get()]
+        for extra in ("Engine RPM", vacuum.NAME):
+            if extra not in names:
+                names.append(extra)
+        units = {p["name"]: p.get("units", "") for p in self.definition["parameters"]}
+        charts = [(n, units.get(n, ""), [(t, v.get(n)) for t, v in hist]) for n in names]
+        codes = ""
+        if hasattr(self, "codes_text"):
+            codes = self.codes_text.get("1.0", "end").strip()
+            if codes.startswith(("Connect to", "Reading codes")):
+                codes = ""
+        if not codes and hist:
+            cur = hist[-1][1].get("_codes") or []
+            codes = "Current codes: " + (", ".join(f"{c} ({x})" for c, x in cur) or "none")
+        tests = [(name, res.status.upper(), res.headline, res.details)
+                 for name, res, _h in self.test_results.values()]
+        done = [v for v in self.leak_verdicts if v.reacted != "waiting"]
+        leak = [(v.spot, v.reacted, " ".join(v.details)) for v in done]
+        comp = None
+        if getattr(self, "last_compare", None):
+            b, a, rows, notes = self.last_compare
+            comp = (f"{b} → {a}: " + compare.verdict_text(rows),
+                    [(r.name, compare.fmt(r.before, r.unit), compare.fmt(r.after, r.unit), r.unit,
+                      r.verdict if r.verdict in (compare.BETTER, compare.WORSE) else "")
+                     for r in rows], notes)
+        events = self.history_events()
+        hist_rows = [(f"{e.when:%Y-%m-%d %H:%M}" if e.when.year > 1 else "?", e.kind, e.name,
+                      e.status, e.summary) for e in events]
+        trends = [f"{n}: {a.upper()} → {b.upper()}" for n, a, b, _, _ in history.status_changes(events)]
+        trends += [f"{n} ({k}): {a:g} → {b:g} over {c} runs" for n, k, a, b, c, _, _ in history.trends(events)]
+        return {"vehicle": self.vehicle_name(), "source": self.source_var.get(),
+                "findings": [(f.severity, f.title, f.detail, f.hint) for f in found],
+                "charts": charts if hist else [], "codes": codes, "tests": tests,
+                "leak": leak, "leak_summary": leak_hunt.summary(done) if done else "",
+                "compare": comp, "history": hist_rows, "trends": trends,
+                "claude": list(self.claude_log)}
+
+    def save_report(self, open_it=True):
+        try:
+            path = report.save(REPORTS_DIR, self.report_data())
+        except OSError as e:
+            messagebox.showerror(APP_NAME, f"Couldn't save the report:\n{e}")
+            return None
+        self.log(f"Saved report: {path}")
+        if open_it:
+            open_folder(path)
+        return path
+
     # ------------------------------------------------------------ History
 
     def _build_history_tab(self):
@@ -1691,6 +1755,7 @@ class App:
     def _build_claude_tab(self):
         tab = ttk.Frame(self.nb, padding=10)
         self.claude_tab = tab
+        self.claude_log = []                     # (question shown, answer) for the report
         self.nb.add(tab, text="Ask Claude")
         top = ttk.Frame(tab)
         top.pack(fill="x")
@@ -1798,6 +1863,7 @@ class App:
                 messagebox.showerror(APP_NAME, f"Couldn't start the Claude client:\n{e}")
                 return
         self.claude_set_busy(True)
+        self.claude_shown = shown
         self.claude_write(f"\nYou: {shown}\n", "you")
         self.claude_write("Claude is thinking… (this can take a minute)\n\n", "note")
         conv = self.claude_conv
@@ -1812,6 +1878,8 @@ class App:
         threading.Thread(target=work, daemon=True).start()
 
     def claude_finished(self, answer, stop_reason, cost):
+        if answer:
+            self.claude_log.append((getattr(self, "claude_shown", ""), answer))
         if self.cl_linebuf:
             self.claude_md_line(self.cl_linebuf, end="")
             self.cl_linebuf = ""
@@ -2352,9 +2420,14 @@ def self_test(root, app, seconds=4.0):
         shown = rpm["value"].cget("text") if rpm else "--"
         codes = app.codes_text.get("1.0", "end")
         obd_ok = shown not in ("--", "") and "P0171" in codes and "Readiness monitors" in codes
-        result["ok"] = result["ok"] and obd_ok
+        rpath = app.save_report(open_it=False)
+        with open(rpath, encoding="utf-8") as f:
+            page = f.read()
+        rep_ok = "<svg" in page and "P0171" in page and "Grand Prix" in page
+        result["ok"] = result["ok"] and obd_ok and rep_ok
         print(f"{result['line']} guided_test={result['status']} "
               f"obd_demo={'ok' if obd_ok else 'FAILED'} (rpm {shown}) "
+              f"report={'ok' if rep_ok else 'FAILED'} "
               f"-> {'OK' if result['ok'] else 'FAILED'}")
         app.on_close()
 
