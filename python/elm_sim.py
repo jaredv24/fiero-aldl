@@ -44,6 +44,7 @@ class SimElm:
         self._coolant, self._last = None, None
         self.cleared = False
         self._stalled = False
+        self.sprays = []
 
     # -------------------------------------------------------------- transport
 
@@ -67,6 +68,10 @@ class SimElm:
             self.mode_t0 = (self.clock() - self.t0) if t is None else t
             if mode != "stall":
                 self._stalled = False
+
+    def spray(self, spot, t=None):
+        """Leak hunt demo: spray at a spot. One spot on this fake engine leaks."""
+        self.sprays.append(((self.clock() - self.t0) if t is None else t, spot))
 
     # ---------------------------------------------------------------- engine
 
@@ -123,6 +128,10 @@ class SimElm:
         else:
             s["o2_up1"] = s["o2_up2"] = s["o2_down"] = 0.45
         s["battery"] = 13.9 if running else 12.5
+        if running and s["closed"] and self.sprays:
+            import leak_hunt
+            if leak_hunt.demo_reaction(self.sprays, t, leak_hunt.DEMO_LEAKS["obd2"]):
+                s.update(o2_up1=0.86, o2_up2=0.84, stft=-14.0, rpm=s["rpm"] + 60)
         return s
 
     def pid_bytes(self, pid, s):

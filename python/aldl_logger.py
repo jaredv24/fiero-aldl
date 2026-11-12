@@ -251,12 +251,17 @@ class SimSource:
         self.mode_t0 = 0.0
         self._coolant = None      # warms only while the engine runs
         self._last_t = None
+        self.sprays = []          # (t, spot) from the leak hunt
 
     def set_mode(self, mode, t=None):
         """Switch the simulated engine's behaviour (used by the guided tests)."""
         if mode in self.MODES and mode != self.mode:
             self.mode = mode
             self.mode_t0 = (time.time() - self.t0) if t is None else t
+
+    def spray(self, spot, t=None):
+        """Leak hunt demo: spray at a spot. One spot on this fake engine leaks."""
+        self.sprays.append(((time.time() - self.t0) if t is None else t, spot))
 
     def send(self, chars):
         for c in chars:
@@ -359,6 +364,10 @@ class SimSource:
             self.cross = (self.cross + o2_rate) % 256
         else:
             o2_mv = 450 + random.uniform(-12, 12)
+        if running and self.sprays:
+            import leak_hunt
+            if leak_hunt.demo_reaction(self.sprays, t, leak_hunt.DEMO_LEAKS["aldl"]):
+                o2_mv, integ, rpm = 860 + random.uniform(-15, 15), 106, rpm + 140
         # Intake air sits near outside temperature while running; with the engine off
         # it heat-soaks toward the coolant, so the two agree on a parked engine.
         mat_f = 70 + (coolant_f - 70) * (0.3 if running else 0.9)

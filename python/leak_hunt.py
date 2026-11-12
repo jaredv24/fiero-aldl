@@ -63,17 +63,16 @@ def judge(hist, mark, now=None):
     score, details = 0.0, []
     o2b, o2a = _window(hist, *b, _o2_volts), _window(hist, *a, _o2_volts)
     if o2b and o2a:
-        rise = max(o2a) - statistics.mean(o2b)
-        rich_share = sum(1 for x in o2a if x > 0.6) / len(o2a)
-        base_share = sum(1 for x in o2b if x > 0.6) / len(o2b)
-        if rise > 0.15 and rich_share - base_share >= 0.3:
-            score += min(1.0, (rich_share - base_share) + rise)
+        # A switching O2 sensor averages ~0.45 V; spray drawn in holds it rich.
+        rise = statistics.mean(o2a) - statistics.mean(o2b)
+        if rise >= 0.15 and max(o2a) > 0.7:
+            score += min(1.0, rise * 3)
             details.append(f"O2 went rich ({statistics.mean(o2b):.2f} → up to {max(o2a):.2f} V).")
     tb, ta = _window(hist, *b, _short_trim), _window(hist, *a, _short_trim)
     if tb and ta:
-        drop = statistics.mean(tb) - min(ta)
+        drop = min(tb) - min(ta)                 # below anything seen before the spray
         if drop >= 4:
-            score += min(0.8, drop / 15)
+            score += min(0.6, drop / 15)
             details.append(f"The computer pulled fuel (short trim {statistics.mean(tb):+.0f}% → "
                            f"{min(ta):+.0f}%).")
     rb = _window(hist, *b, lambda v: v.get("Engine RPM"))
@@ -82,7 +81,8 @@ def judge(hist, mark, now=None):
         change = statistics.mean(ra) - statistics.mean(rb)
         steadier = (statistics.pstdev(ra) < statistics.pstdev(rb) * 0.6
                     if len(ra) > 2 and len(rb) > 2 and statistics.pstdev(rb) > 30 else False)
-        if abs(change) >= 40:
+        noise = statistics.pstdev(rb) if len(rb) > 2 else 0
+        if abs(change) >= max(40, noise):
             score += min(0.6, abs(change) / 200)
             details.append(f"Idle changed {change:+.0f} rpm.")
         if steadier:
@@ -109,5 +109,31 @@ def summary(verdicts):
     if len(hits) > 1:
         text += " Also reacted: " + ", ".join(v.spot for v in hits[1:]) + "."
     text += (" Confirm by spraying that spot again, and look closely at the hose or gasket there. "
-             "Spray drawn into the intake can also come from a nearby spot, so check neighbours.")
+             "Spray drawn into the intake can also come from a nearby spot, so check the spots next to it.")
     return text
+
+
+# ------------------------------------------------------------ demo engines
+
+def demo_reaction(sprays, t, leaky_words):
+    """For the simulators: True while a recent spray at a leaky spot is being drawn in."""
+    for st, spot in sprays:
+        if 1.5 <= t - st <= 6.5 and any(w in spot.lower() for w in leaky_words):
+            return True
+    return False
+
+
+# Spots to offer in the app, by engine. Free text works too.
+SPOTS = {
+    "aldl": ["EGR block-off plate (valve end)", "EGR block-off plate (pipe end)",
+             "Old EGR vacuum line / port", "Throttle body base gasket", "IAC valve seal",
+             "Intake plenum gasket", "Lower intake gasket, front bank",
+             "Lower intake gasket, rear bank", "PCV valve and hose", "Brake booster hose",
+             "MAP sensor hose", "Vacuum tree / small hoses", "Fuel pressure regulator hose"],
+    "obd2": ["Upper intake (supercharger) gasket", "Lower intake gasket, front bank",
+             "Lower intake gasket, rear bank", "Throttle body gasket", "PCV hose and valve",
+             "Brake booster hose", "Supercharger bypass actuator hose",
+             "Intake air duct after the MAF sensor", "Fuel pressure regulator hose",
+             "EVAP purge valve and hose", "Vacuum lines / small hoses"],
+}
+DEMO_LEAKS = {"aldl": ("egr block-off plate (valve end)",), "obd2": ("lower intake gasket, rear",)}

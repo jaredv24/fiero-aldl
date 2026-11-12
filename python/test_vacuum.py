@@ -134,3 +134,33 @@ class LeakHuntTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DemoLeakTests(unittest.TestCase):
+    def test_fiero_demo_reacts_only_at_its_leak(self):
+        sim = al.SimSource()
+        d = al.load_definition(al.DEMO_DEF)
+        sim.spray("EGR block-off plate (valve end)", t=50)
+        sim.spray("Brake booster hose", t=80)
+        hist, t = [], 30.0
+        while t < 100:
+            hist.append((t, {n: x for n, x, _, _ in al.decode(sim.frame(t), d)}))
+            t += 1.25
+        good = lh.judge(hist, lh.Mark(50, "EGR block-off plate (valve end)"))
+        other = lh.judge(hist, lh.Mark(80, "Brake booster hose"))
+        self.assertEqual(good.reacted, "yes", good.details)
+        self.assertEqual(other.reacted, "no", other.details)
+
+    def test_gtp_demo_reacts_only_at_its_leak(self):
+        clock = Clock(100)
+        sim = elm_sim.SimElm(clock=clock)
+        src = obd_source.ObdSource(sim, GTP, status_every=0)
+        hist = collect(src, 140, clock)          # warm up first
+        src.spray("Lower intake gasket, rear bank")
+        t_leak = clock.t
+        hist += collect(src, clock.t + 15, clock)
+        src.spray("PCV hose and valve")
+        t_pcv = clock.t
+        hist += collect(src, clock.t + 15, clock)
+        self.assertEqual(lh.judge(hist, lh.Mark(t_leak, "rear")).reacted, "yes")
+        self.assertEqual(lh.judge(hist, lh.Mark(t_pcv, "pcv")).reacted, "no")

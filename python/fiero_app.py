@@ -41,6 +41,7 @@ import obd_source
 import obd_tests
 import obd
 import cable_check
+import leak_hunt
 import vacuum
 
 APP_NAME = "Fiero ALDL"
@@ -323,6 +324,7 @@ class App:
 
         self._build_codes_tab()
         self._build_tests_tab()
+        self._build_leak_tab()
         self._build_claude_tab()
 
         # Raw bytes
@@ -457,6 +459,7 @@ class App:
         self.load_current_definition()
         if hasattr(self, "test_tree"):
             self.populate_tests()
+        self.update_leak_spots()
 
     def refresh_ports(self):
         ports = list_serial_ports()
@@ -724,6 +727,9 @@ class App:
             self.vac.checked_baseline = True
             self.vac.baro_v = self.vac.baro_v or self.baseline_baro()
         self.vac.update(values)
+        vnow = values.get(vacuum.NAME)
+        if vnow is not None and hasattr(self, "leak_vac"):
+            self.leak_vac.set(f"Vacuum now: {vnow:.1f} inHg" + (" (est.)" if (values.get("MAP") or 99) < 15 else ""))
         self.show_ecm_status(frame, codes, flags)
         params = {p["name"]: p for p in self.definition["parameters"]}
         rows = [(n, values.get(n), p.get("units", ""), p) for n, p in params.items()]
@@ -737,6 +743,8 @@ class App:
                 frac = max(0.0, min(1.0, (value - rng[0]) / (rng[1] - rng[0])))
                 tile["bar"].configure(value=frac * 1000)
         self.history.append((elapsed, values))
+        if getattr(self, "leak_marks", None):
+            self.refresh_leaks()
         while self.history and elapsed - self.history[0][0] > CHART_SECONDS:
             self.history.popleft()
         if frame is not None:
@@ -1138,6 +1146,90 @@ class App:
             parts.append((verdict + "\n", tag))
             parts.append(("Rules vary by state; check yours.\n", "muted"))
         self.codes_write(parts)
+
+    # ------------------------------------------------------------ Leak hunt
+
+    def _build_leak_tab(self):
+        tab = ttk.Frame(self.nb, padding=10)
+        self.nb.add(tab, text="Leak hunt")
+        self.leak_marks = []
+        self.leak_verdicts = []
+        ttk.Label(tab, wraplength=900, justify="left", text=(
+            "Find a vacuum leak with the engine idling warm. Spray a short burst of carb cleaner "
+            "(or propane from an unlit torch) at ONE spot, then press 'I sprayed here'. Wait "
+            "about 10 seconds before the next spot. If the engine sucks the spray in, the O2 "
+            "sensor goes rich, the computer pulls fuel and the idle changes; the app checks "
+            "each spot for that. Keep spray away from hot exhaust parts and anything sparking, "
+            "and have a fire extinguisher handy.")).pack(anchor="w")
+        self.leak_vac = tk.StringVar(value="Vacuum now: --")
+        ttk.Label(tab, textvariable=self.leak_vac, font=("Helvetica", 16, "bold")).pack(
+            anchor="w", pady=(8, 4))
+        row = ttk.Frame(tab)
+        row.pack(fill="x", pady=4)
+        ttk.Label(row, text="Spot:").pack(side="left")
+        self.leak_spot = ttk.Combobox(row, width=42)
+        self.leak_spot.pack(side="left", padx=6)
+        ttk.Button(row, text="I sprayed here", command=self.mark_spray).pack(side="left")
+        ttk.Button(row, text="Start over", command=self.clear_leaks).pack(side="left", padx=6)
+        cols = ("spot", "when", "result", "details")
+        self.leak_tree = ttk.Treeview(tab, columns=cols, show="headings", height=10)
+        for c, w, text in (("spot", 260, "Spot"), ("when", 80, "Sprayed"),
+                           ("result", 90, "Reacted?"), ("details", 520, "What changed")):
+            self.leak_tree.heading(c, text=text)
+            self.leak_tree.column(c, width=w, anchor="w")
+        self.leak_tree.pack(fill="both", expand=True, pady=6)
+        self.leak_summary = tk.StringVar(value=leak_hunt.summary([]))
+        ttk.Label(tab, textvariable=self.leak_summary, wraplength=900, justify="left",
+                  font=("Helvetica", 13)).pack(anchor="w")
+        self.update_leak_spots()
+
+    def update_leak_spots(self):
+        if hasattr(self, "leak_spot"):
+            self.leak_spot.configure(values=leak_hunt.SPOTS["obd2" if self.is_obd() else "aldl"])
+
+    def mark_spray(self):
+        spot = self.leak_spot.get().strip()
+        if not spot:
+            self.leak_summary.set("Pick or type the spot you sprayed first.")
+            return
+        if not self.reader:
+            self.leak_summary.set("Connect to the car (or a demo) first.")
+            return
+        t = time.time() - self.t0
+        self.leak_marks.append(leak_hunt.Mark(t, spot))
+        src = getattr(self.reader, "src", None)
+        if src is not None and hasattr(src, "spray"):
+            src.spray(spot)                 # demo engines react to their leaky spot
+        self.log(f"Leak hunt: sprayed {spot}")
+        self.refresh_leaks()
+
+    def clear_leaks(self):
+        self.leak_marks, self.leak_verdicts = [], []
+        self.refresh_leaks()
+
+    def refresh_leaks(self):
+        hist = list(self.history)
+        self.leak_verdicts = [leak_hunt.judge(hist, m) for m in self.leak_marks]
+        self.leak_tree.delete(*self.leak_tree.get_children())
+        for v in self.leak_verdicts:
+            self.leak_tree.insert("", "end", values=(
+                v.spot, time.strftime("%H:%M:%S", time.localtime(self.t0 + v.t)),
+                {"yes": "YES", "maybe": "maybe", "no": "no", "waiting": "…"}[v.reacted],
+                " ".join(v.details)))
+        done = [v for v in self.leak_verdicts if v.reacted != "waiting"]
+        waiting = len(self.leak_verdicts) - len(done)
+        text = leak_hunt.summary(done) if done else leak_hunt.summary([])
+        if waiting:
+            text = "Watching the last spray… " + ("" if not done else text)
+        self.leak_summary.set(text)
+
+    def leak_hunt_text(self):
+        """Plain-text results for Claude and the report."""
+        done = [v for v in self.leak_verdicts if v.reacted != "waiting"]
+        if not done:
+            return ""
+        lines = [f"- {v.spot}: {v.reacted} ({' '.join(v.details)})" for v in done]
+        return "Leak hunt (spray test) results:\n" + "\n".join(lines) + "\n" + leak_hunt.summary(done)
 
     # ------------------------------------------------------------ Tests
 

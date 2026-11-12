@@ -75,6 +75,10 @@ class ObdSource:
         if hasattr(self.transport, "set_mode"):
             self.transport.set_mode(mode)
 
+    def spray(self, spot):
+        if hasattr(self.transport, "spray"):
+            self.transport.spray(spot)
+
     def send(self, chars):
         pass
 
