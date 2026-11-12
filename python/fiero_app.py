@@ -30,6 +30,7 @@ from tkinter import filedialog, messagebox, ttk
 import aldl160
 import aldl_logger as al
 import analysis
+import claude_agent
 import claude_assistant
 import derived
 import guided_tests
@@ -678,6 +679,8 @@ class App:
                     self.codes_result(*payload)
                 elif kind == "claude_text":
                     self.claude_stream_text(payload)
+                elif kind == "claude_tool":
+                    self.claude_tool_note(*payload)
                 elif kind == "claude_done":
                     self.claude_finished(*payload)
                 elif kind == "claude_error":
@@ -1313,6 +1316,129 @@ class App:
         self.checks_store().delete(index)
         self.refresh_checks()
 
+    # ------------------------------------------------- Claude's tools
+
+    TOOL_LABELS = {"get_live_snapshot": "looking at the live data", "read_codes": "reading codes",
+                   "list_tests": "listing guided tests", "start_test": "starting a guided test",
+                   "get_test_result": "reading a test result", "get_history": "reading this car's history",
+                   "get_leak_hunt": "reading leak hunt results"}
+
+    def claude_tool_note(self, name, args):
+        if self.cl_linebuf:
+            self.claude_md_line(self.cl_linebuf, end="")
+            self.cl_linebuf = ""
+        extra = f" ({args.get('test_id')})" if isinstance(args, dict) and args.get("test_id") else ""
+        self.claude_write(f"\n[Claude is {self.TOOL_LABELS.get(name, name)}{extra}…]\n", "note")
+
+    def on_main(self, fn, timeout=30):
+        """Run fn() on the GUI thread from Claude's worker thread and return its result."""
+        if threading.current_thread() is threading.main_thread():
+            return fn()
+        box, done = {}, threading.Event()
+
+        def run():
+            try:
+                box["v"] = fn()
+            except Exception as e:
+                box["e"] = e
+            done.set()
+        self.root.after(0, run)
+        if not done.wait(timeout):
+            raise TimeoutError("the app didn't respond in time")
+        if "e" in box:
+            raise box["e"]
+        return box["v"]
+
+    def agent_handlers(self):
+        def wrap(fn):
+            return lambda args: self.on_main(lambda: fn(args))
+        return {"get_live_snapshot": wrap(self.tool_snapshot), "read_codes": self.tool_read_codes,
+                "list_tests": wrap(self.tool_list_tests), "start_test": wrap(self.tool_start_test),
+                "get_test_result": wrap(self.tool_test_result),
+                "get_history": wrap(lambda a: self.history_text() or "No saved tests or checks yet."),
+                "get_leak_hunt": wrap(lambda a: "\n\n".join(
+                    x for x in (self.leak_hunt_text(), self.compare_text()) if x)
+                    or "No leak hunt or comparison this session.")}
+
+    def tool_snapshot(self, args):
+        if not self.history:
+            return "Not connected: no live data. Ask the owner to connect to the car first."
+        summary = claude_assistant.summary_for_live(self.history, self.params_by_name(),
+                                                    self.baseline_baro(), self.recent_results())
+        found = vacuum.findings(list(self.history))
+        if self.is_obd():
+            found = obd_analysis.analyze(list(self.history), self.vehicle_profile()) + found
+        extra = "\n".join(f"- [{f.severity}] {f.title}: {f.detail}" for f in found)
+        return summary + ("\nMore findings:\n" + extra if extra else "")
+
+    def tool_read_codes(self, args):
+        src = self.on_main(self._obd_src)
+        if src is None:
+            def fiero():
+                if not self.history:
+                    return "Not connected."
+                codes = self.history[-1][1].get("_codes") or []
+                return "Codes in the data stream now: " + (
+                    ", ".join(f"{c} ({x})" for c, x in codes) or "none")
+            return self.on_main(fiero)
+        box, done = {}, threading.Event()
+
+        def got(r):
+            box["r"] = r
+            done.set()
+            self.q.put(("obd_result", ("report", r)))      # also show it in the Codes tab
+        src.call(obd_source.codes_report, got)
+        if not done.wait(30):
+            return "The adapter didn't answer in time."
+        r = box["r"]
+        if isinstance(r, Exception):
+            return f"Couldn't read codes: {r}"
+        st = r.get("status") or {}
+        lines = [f"Check engine light: {'ON' if st.get('mil') else 'off'}"]
+        for key in ("stored", "pending", "permanent"):
+            lines.append(f"{key} codes: " + (", ".join(f"{c} ({t})" for c, t in r.get(key) or []) or "none"))
+        ff = r.get("freeze") or {}
+        if ff.get("code"):
+            lines.append(f"Freeze frame for {ff['code']}: " + ", ".join(
+                f"{k}={v:.1f}" for k, v in ff.get("values", {}).items()))
+        mons = st.get("monitors") or []
+        if mons:
+            lines.append("Readiness: " + ", ".join(f"{n}: {s}" for n, s in mons))
+        return "\n".join(lines)
+
+    def tool_list_tests(self, args):
+        out = []
+        for t in self.current_tests():
+            res = self.test_results.get(t.id)
+            out.append({"id": t.id, "name": t.name, "condition": t.condition, "checks": t.summary,
+                        "last_result": f"{res[1].status}: {res[1].headline}" if res else None})
+        return out
+
+    def tool_start_test(self, args):
+        tid = args["test_id"]
+        if not any(t.id == tid for t in self.current_tests()):
+            return f"No test with id {tid!r}; call list_tests."
+        if self.reader is None:
+            return "Not connected, so the test can't start. Ask the owner to connect first."
+        if self.runner is not None and not self.runner.done:
+            return f"Another test is running ({self.runner.test.name}); wait for it to finish."
+        self.test_tree.selection_set(tid)
+        self.show_test()
+        self.start_test()
+        t = next(t for t in self.current_tests() if t.id == tid)
+        steps = "\n".join(f"{i + 1}. {st.text}" for i, st in enumerate(t.steps))
+        return (f"Started '{t.name}' in the Tests tab. The owner follows these steps and presses "
+                f"Next step between them:\n{steps}")
+
+    def tool_test_result(self, args):
+        res = self.test_results.get(args["test_id"])
+        if not res:
+            running = self.runner is not None and not self.runner.done and self.runner.test.id == args["test_id"]
+            return "Still running." if running else "That test hasn't been run this session."
+        name, r, _h = res
+        return {"test": name, "status": r.status, "headline": r.headline, "details": r.details,
+                "numbers": r.numbers}
+
     # ------------------------------------------------------------ Report
 
     def report_data(self):
@@ -1857,8 +1983,9 @@ class App:
         if self.claude_conv is None:
             try:
                 prof = self.vehicle_profile()
-                self.claude_conv = claude_assistant.Conversation(
-                    api_key=key, system=claude_assistant.system_prompt_for(prof, self.is_obd()))
+                self.claude_conv = claude_agent.Agent(
+                    self.agent_handlers(), api_key=key,
+                    system=claude_assistant.system_prompt_for(prof, self.is_obd()))
             except Exception as e:  # SDK missing or bad configuration
                 messagebox.showerror(APP_NAME, f"Couldn't start the Claude client:\n{e}")
                 return
@@ -1870,7 +1997,8 @@ class App:
 
         def work():
             try:
-                result = conv.ask(prompt, lambda chunk: self.q.put(("claude_text", chunk)))
+                result = conv.ask(prompt, lambda chunk: self.q.put(("claude_text", chunk)),
+                                  lambda name, args: self.q.put(("claude_tool", (name, args))))
                 self.q.put(("claude_done", result))
             except Exception as e:
                 self.q.put(("claude_error", claude_assistant.describe_error(e)))
@@ -2420,6 +2548,10 @@ def self_test(root, app, seconds=4.0):
         shown = rpm["value"].cget("text") if rpm else "--"
         codes = app.codes_text.get("1.0", "end")
         obd_ok = shown not in ("--", "") and "P0171" in codes and "Readiness monitors" in codes
+        h = app.agent_handlers()
+        tools_ok = ("P0171" in h["read_codes"]({}) and "Engine RPM" in h["get_live_snapshot"]({})
+                    and any(t["id"] == "obd_idle" for t in h["list_tests"]({})))
+        obd_ok = obd_ok and tools_ok
         rpath = app.save_report(open_it=False)
         with open(rpath, encoding="utf-8") as f:
             page = f.read()
@@ -2427,7 +2559,7 @@ def self_test(root, app, seconds=4.0):
         result["ok"] = result["ok"] and obd_ok and rep_ok
         print(f"{result['line']} guided_test={result['status']} "
               f"obd_demo={'ok' if obd_ok else 'FAILED'} (rpm {shown}) "
-              f"report={'ok' if rep_ok else 'FAILED'} "
+              f"claude_tools={'ok' if tools_ok else 'FAILED'} report={'ok' if rep_ok else 'FAILED'} "
               f"-> {'OK' if result['ok'] else 'FAILED'}")
         app.on_close()
 

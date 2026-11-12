@@ -41,7 +41,7 @@ jobs:
 
       - name: Unit tests
         working-directory: python
-        run: python -m unittest test_aldl_logger test_cable test_analysis test_claude_assistant test_derived test_guided_tests test_vehicle_profile test_obd test_vacuum test_compare test_checks test_history test_report -v
+        run: python -m unittest test_aldl_logger test_cable test_analysis test_claude_assistant test_derived test_guided_tests test_vehicle_profile test_obd test_vacuum test_compare test_checks test_history test_report test_claude_agent -v
 
       - name: App self-test (from source)
         working-directory: python
