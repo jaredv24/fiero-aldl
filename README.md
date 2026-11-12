@@ -107,6 +107,38 @@ RPM hunt's period and regularity, which reading moves first, manifold pressure a
 atmosphere, relative airflow and fuel-flow indexes, gears in use, warm-up rate, spark pulled for
 knock, and one-frame sensor glitches that point to bad wiring.
 
+### Finding the problem: vacuum, leak hunt, checks, history
+
+- **Vacuum (est.)**: a dashboard tile and chart line worked out from the MAP sensor. On OBD-II
+  cars it's barometric pressure minus MAP (negative numbers are supercharger boost). On the
+  Fiero it's an estimate from MAP volts against the key-on engine-off reading. The Analysis tab
+  reads the warm-idle pattern like a vacuum gauge: steady 17–21 inHg (general rule, at sea
+  level), low and steady, drifting with the idle hunt, or flickering.
+- **Leak hunt** tab: with the engine idling warm, spray one spot at a time with carb cleaner or
+  unlit propane and press **I sprayed here**. The app compares the seconds after each spray with
+  the seconds before it (O2 going rich, the computer pulling fuel, the idle changing) and ranks
+  the spots. Each demo car has one leaky spot to find.
+- **Compare before/after…** (Analysis tab): pick a log from before a repair and one from after.
+  Both are boiled down to warm-idle numbers (idle swing, lowest RPM, IAC, trims, vacuum, O2
+  switching, stalls) and marked better, worse or about the same.
+- **Checks** tab: record readings you take with tools (fuel pressure, timing, compression,
+  vacuum gauge, battery and charging voltage, notes about repairs). Each is compared with the
+  vehicle profile's normal or a labeled general rule and saved per vehicle.
+- **History** tab: every guided test and check for the car, with results that changed and
+  numbers that moved over time.
+- **Save report**: one HTML page with charts, findings, codes, test results, leak hunt,
+  comparison, history and Claude's answers. Open it in a browser, print it or send it.
+
+### PID explorer (OBD-II, GM extras)
+
+GM computers answer maker-specific "mode 22" PIDs that generic OBD-II doesn't cover. The
+**PID explorer** tab scans a range of them (read requests only, nothing is written), then
+watches the ones that answer while you do things (rev the engine, switch on the A/C) and
+reports what each seems to be: which standard reading it moves with and a formula to convert
+it, or which action flips it. **Add selected to vehicle profile…** saves it to your copy of the
+profile so it shows on the Dashboard. These are leads, not factory definitions: check them
+against GM's scan tool data list when you can. The Grand Prix demo answers four made-up PIDs.
+
 ### Ask Claude (optional)
 
 The **Ask Claude** tab sends Claude (model `claude-opus-5-5`) a compact summary of the data:
@@ -119,6 +151,10 @@ and the Analysis findings. The answer streams in; ask follow-ups below it.
 - **Billed to that key**, separately from any Claude subscription. Each answer shows its rough
   cost; a question about a minute of data is usually a few cents.
 - **Nothing is sent** until you click a button, and only engine data is sent.
+- Claude works as a diagnostic partner: while answering it can look things up in the app (live
+  readings, codes, guided tests, checks, history, leak hunt) and start a guided test for you to
+  run at the car. It can't clear codes or change anything on the car. The lookups it makes
+  show in the chat.
 - Claude can be wrong. Treat its answer like advice from a knowledgeable friend: verify before
   buying parts.
 
@@ -345,7 +381,7 @@ You can type these in the Arduino Serial Monitor at 115200 baud:
 ## Tests
 
 ```bash
-cd python && python -m unittest test_aldl_logger test_cable test_analysis test_claude_assistant test_derived test_guided_tests test_vehicle_profile test_obd -v
+cd python && python -m unittest test_aldl_logger test_cable test_analysis test_claude_assistant test_derived test_guided_tests test_vehicle_profile test_obd test_vacuum test_compare test_checks test_history test_report test_claude_agent test_pid_explorer -v
 ```
 
 ```bash

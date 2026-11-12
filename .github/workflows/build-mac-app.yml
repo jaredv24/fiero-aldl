@@ -95,8 +95,12 @@ jobs:
           name: Fiero ALDL ${{ inputs.release_tag || github.ref_name }}
           files: dist/*.zip
           body: |
-            Mac app for reading live data from a 1985-88 Pontiac Fiero 2.8 V6 (ECM 1227170,
-            GM data stream A29) through a 160 baud USB ALDL cable or the DIY Arduino interface.
+            Mac diagnostic app for a 1985-88 Pontiac Fiero 2.8 V6 (ECM 1227170, GM data stream
+            A29, through a 160 baud USB ALDL cable or the DIY Arduino interface) and for 1996+
+            OBD-II cars through an ELM327-compatible adapter such as the OBDLink SX, with a
+            profile for the 2002 Grand Prix GTP. Includes guided tests, a vacuum gauge from the
+            MAP sensor, a leak hunt, before/after comparison, hands-on checks, vehicle history,
+            session reports, a GM mode 22 PID explorer and optional Ask Claude.
 
             **Download** the zip for your Mac:
             - `Fiero-ALDL-apple-silicon.zip`: M1 and newer
@@ -107,4 +111,5 @@ jobs:
 
                 xattr -dr com.apple.quarantine "/Applications/Fiero ALDL.app"
 
-            Not yet tested on a real car; readings follow GM's A29 specification. See the README.
+            Not yet tested on a real car: the Fiero readings follow GM's A29 specification and the
+            OBD-II side was tested against a simulated adapter. See the README.
