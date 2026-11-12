@@ -76,7 +76,7 @@ class DriverTests(unittest.TestCase):
 
     def test_no_data_and_errors(self):
         self.assertIsNone(self.e.mode01(0x5C))       # not supported -> NO DATA
-        self.assertIsNone(self.e.mode22("1234", 1))
+        self.assertIsNone(self.e.mode22("4321", 1))      # a PID the demo car doesn't answer
 
     def test_can_style_replies_parse(self):
         lines = ["014", "0: 49 02 01 31 47 32", "1: 57 52 35 32 31 30 32", "2: 44 45 4D 4F 30 30 31"]

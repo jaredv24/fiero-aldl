@@ -25,7 +25,7 @@ from collections import deque
 from datetime import datetime
 
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import aldl160
 import aldl_logger as al
@@ -40,6 +40,7 @@ import elm_sim
 import obd_analysis
 import obd_source
 import obd_tests
+import pid_explorer
 import obd
 import cable_check
 import checks
@@ -337,6 +338,7 @@ class App:
         self._build_leak_tab()
         self._build_checks_tab()
         self._build_history_tab()
+        self._build_pid_tab()
         self._build_claude_tab()
 
         # Raw bytes
@@ -658,6 +660,8 @@ class App:
                 kind, payload = self.q.get_nowait()
                 if kind == "line":
                     self.handle_line(payload)
+                elif kind == "ui":
+                    payload()
                 elif kind == "log":
                     self.log_text.configure(state="normal")
                     self.log_text.insert("end", payload)
@@ -759,6 +763,8 @@ class App:
                 frac = max(0.0, min(1.0, (value - rng[0]) / (rng[1] - rng[0])))
                 tile["bar"].configure(value=frac * 1000)
         self.history.append((elapsed, values))
+        if getattr(self, "px_latest", None) is not None:
+            self.px_latest = values
         if getattr(self, "leak_marks", None):
             self.refresh_leaks()
         while self.history and elapsed - self.history[0][0] > CHART_SECONDS:
@@ -1499,6 +1505,215 @@ class App:
         if open_it:
             open_folder(path)
         return path
+
+    # ------------------------------------------------------------ PID explorer
+
+    PX_ACTIONS = ["Rev to about 2500 rpm and hold", "A/C on", "Turn the steering wheel",
+                  "Headlights on", "Shift to Drive (foot on the brake)", "Cooling fan running"]
+
+    def _build_pid_tab(self):
+        tab = ttk.Frame(self.nb, padding=10)
+        self.nb.add(tab, text="PID explorer")
+        self.px_found, self.px_explorer, self.px_scanning, self.px_watching = [], None, False, False
+        self.px_latest = None
+        ttk.Label(tab, wraplength=950, justify="left", text=(
+            "OBD-II only. Finds the maker-specific readings (mode 22 PIDs) your car's computer "
+            "answers and works out what they are. It only sends read requests; nothing is "
+            "written to the car. 1) Scan a range. 2) Watch with the engine running and use the "
+            "action buttons while you do each thing. 3) Add the ones it identifies to your "
+            "vehicle profile so they show on the Dashboard. Live readings pause while a scan runs. "
+            "The Grand Prix demo answers four made-up PIDs so you can try it.")).pack(anchor="w")
+        row = ttk.Frame(tab)
+        row.pack(fill="x", pady=(8, 4))
+        ttk.Label(row, text="PIDs from").pack(side="left")
+        self.px_from = ttk.Entry(row, width=6)
+        self.px_from.insert(0, pid_explorer.DEFAULT_RANGE[0])
+        self.px_from.pack(side="left", padx=4)
+        ttk.Label(row, text="to").pack(side="left")
+        self.px_to = ttk.Entry(row, width=6)
+        self.px_to.insert(0, pid_explorer.DEFAULT_RANGE[1])
+        self.px_to.pack(side="left", padx=4)
+        self.px_scan_btn = ttk.Button(row, text="Scan", command=self.px_scan)
+        self.px_scan_btn.pack(side="left", padx=4)
+        ttk.Button(row, text="Stop", command=self.px_stop).pack(side="left")
+        self.px_watch_btn = ttk.Button(row, text="Start watching", command=self.px_toggle_watch)
+        self.px_watch_btn.pack(side="left", padx=(16, 4))
+        self.px_status = ttk.Label(row, foreground=self.c["muted"])
+        self.px_status.pack(side="left", padx=8)
+        arow = ttk.Frame(tab)
+        arow.pack(fill="x", pady=4)
+        ttk.Label(arow, text="Action:").pack(side="left")
+        self.px_action = ttk.Combobox(arow, values=self.PX_ACTIONS, width=34)
+        self.px_action.set(self.PX_ACTIONS[1])
+        self.px_action.pack(side="left", padx=4)
+        ttk.Button(arow, text="I'm doing it now", command=self.px_action_start).pack(side="left", padx=4)
+        ttk.Button(arow, text="Done", command=self.px_action_stop).pack(side="left")
+        cols = ("pid", "bytes", "value", "guess")
+        self.px_tree = ttk.Treeview(tab, columns=cols, show="headings", height=12)
+        for c, w, t in (("pid", 70, "PID"), ("bytes", 60, "Bytes"), ("value", 110, "Latest"),
+                        ("guess", 640, "What it seems to be")):
+            self.px_tree.heading(c, text=t)
+            self.px_tree.column(c, width=w, anchor="w")
+        self.px_tree.pack(fill="both", expand=True, pady=6)
+        ttk.Button(tab, text="Add selected to vehicle profile…", command=self.px_add).pack(anchor="e")
+
+    def px_src(self):
+        src = self._obd_src()
+        if src is None:
+            messagebox.showinfo(APP_NAME, "The PID explorer needs an OBD-II connection "
+                                          "(or the Grand Prix demo).")
+        return src
+
+    def px_scan(self):
+        src = self.px_src()
+        if src is None or self.px_scanning:
+            return
+        a, b = self.px_from.get().strip(), self.px_to.get().strip()
+        try:
+            if not (0 <= int(a, 16) <= int(b, 16) <= 0xFFFF):
+                raise ValueError
+        except ValueError:
+            messagebox.showerror(APP_NAME, "Enter the range as 4-digit hex, e.g. 1100 to 12FF.")
+            return
+        self.px_scanning = True
+        self.px_status.configure(text="Scanning…")
+
+        def progress(done, total, found):
+            self.q.put(("ui", lambda: self.px_status.configure(
+                text=f"Scanning… {done}/{total} PIDs, {found} answered")))
+
+        def work(elm):
+            return pid_explorer.scan(elm, a, b, progress, stop=lambda: not self.px_scanning)
+        src.call(work, lambda r: self.q.put(("ui", lambda: self.px_scan_done(r))))
+
+    def px_stop(self):
+        self.px_scanning = False
+        if self.px_watching:
+            self.px_toggle_watch()
+
+    def px_scan_done(self, r):
+        self.px_scanning = False
+        if isinstance(r, Exception):
+            self.px_status.configure(text=f"Scan failed: {r}")
+            return
+        known = dict(self.px_found)
+        known.update(dict(r))
+        self.px_found = sorted(known.items())
+        self.px_explorer = pid_explorer.Explorer({p: len(d) for p, d in self.px_found})
+        self.px_status.configure(text=f"{len(r)} PIDs answered. Start watching with the engine running.")
+        self.log(f"PID explorer: {len(r)} PIDs answered in {self.px_from.get()}-{self.px_to.get()}")
+        self.px_refresh()
+
+    def px_toggle_watch(self):
+        if self.px_watching:
+            self.px_watching = False
+            self.px_watch_btn.configure(text="Start watching")
+            self.px_explorer and self.px_explorer.stop_action(time.time() - self.t0)
+            return
+        if not self.px_found:
+            messagebox.showinfo(APP_NAME, "Scan first so there's something to watch.")
+            return
+        if self.px_src() is None:
+            return
+        self.px_watching = True
+        self.px_latest = {}
+        self.px_watch_btn.configure(text="Stop watching")
+        self.px_read_round()
+
+    def px_read_round(self):
+        src = self._obd_src()
+        if not self.px_watching or src is None:
+            self.px_watching = False
+            self.px_watch_btn.configure(text="Start watching")
+            return
+        pids = [p for p, _ in self.px_found]
+
+        def work(elm):
+            # Standard readings in the same moment as the PIDs, so they line up in time.
+            std = {}
+            for pid in (0x0C, 0x05, 0x0D, 0x11, 0x10, 0x0B):
+                if pid in (elm.supported or []):
+                    std[obd.PIDS[pid][1]] = elm.read(pid)
+            return {p: elm.mode22_raw(p) for p in pids}, std
+
+        def done(r):
+            if not isinstance(r, Exception) and self.px_explorer is not None:
+                readings, std = r
+                self.px_explorer.add(time.time() - self.t0, readings, std)
+                if len(self.px_explorer.samples) % 3 == 0:
+                    self.px_refresh()
+            self.root.after(300, self.px_read_round)
+        src.call(work, lambda r: self.q.put(("ui", lambda: done(r))))
+
+    def px_action_start(self):
+        if not self.px_watching:
+            messagebox.showinfo(APP_NAME, "Start watching first, then press this as you do the action.")
+            return
+        name = self.px_action.get().strip() or "action"
+        self.px_explorer.start_action(name, time.time() - self.t0)
+        self.px_status.configure(text=f"Recording: {name}. Press Done when you stop.")
+        src = self._obd_src()
+        if src is not None and hasattr(src.transport, "DEMO_ENHANCED"):    # demo car reacts
+            if name == "A/C on":
+                src.transport.demo_switch = True      # its made-up switch PID
+            elif name.startswith("Rev"):
+                src.transport.set_mode("rpm2500")
+
+    def px_action_stop(self):
+        if self.px_explorer:
+            self.px_explorer.stop_action(time.time() - self.t0)
+        src = self._obd_src()
+        if src is not None and hasattr(src.transport, "DEMO_ENHANCED"):
+            src.transport.demo_switch = False
+            src.transport.set_mode("idle")
+        self.px_status.configure(text="Watching.")
+        self.px_refresh()
+
+    def px_refresh(self):
+        self.px_tree.delete(*self.px_tree.get_children())
+        results = {f.pid: f for f in self.px_explorer.results()} if self.px_explorer else {}
+        for pid, data in self.px_found:
+            f = results.get(pid)
+            last = " ".join(f"{b:02X}" for b in data)
+            if self.px_explorer and self.px_explorer.samples:
+                cur = self.px_explorer.samples[-1][1].get(pid)
+                last = " ".join(f"{b:02X}" for b in cur) if cur else "no answer"
+            guess = f.guess() if f and self.px_explorer.samples else "not watched yet"
+            if f and f.form not in ("A",) and (f.matches or f.actions):
+                guess = f"[{f.form}] " + guess
+            self.px_tree.insert("", "end", iid=pid, values=(pid, len(data), last, guess))
+
+    def px_add(self):
+        sel = self.px_tree.selection()
+        prof = self.vehicle_profile()
+        if not sel or prof is None:
+            messagebox.showinfo(APP_NAME, "Pick a PID, and a vehicle profile under Vehicles…, first.")
+            return
+        pid = sel[0]
+        nbytes = dict(self.px_found)[pid] and len(dict(self.px_found)[pid])
+        f = next((f for f in (self.px_explorer.results() if self.px_explorer else []) if f.pid == pid), None)
+        formula = f.matches[0][2] if f and f.matches else ("A*256+B" if nbytes >= 2 else "A")
+        unit = {"Engine RPM": "rpm", "Coolant temp": "F", "Vehicle speed": "mph"}.get(
+            f.matches[0][0], "") if f and f.matches else ""
+        name = simpledialog.askstring(APP_NAME, f"Name for PID {pid} (formula {formula}):",
+                                      parent=self.root)
+        if not name:
+            return
+        entry = pid_explorer.to_profile_entry(name.strip(), pid, min(nbytes, 4), formula, unit)
+        import copy
+        newp = copy.deepcopy(prof)
+        newp["enhanced_pids"] = [e for e in newp.get("enhanced_pids") or [] if e["pid"] != pid] + [entry]
+        try:
+            vehicle_profile.validate(newp)
+            path = os.path.join(VEHICLES_DIR, vehicle_profile.safe_filename(newp))
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(newp, fh, indent=2)
+        except (vehicle_profile.ProfileError, OSError) as e:
+            messagebox.showerror(APP_NAME, f"Couldn't save it to the profile:\n{e}")
+            return
+        self.log(f"Added PID {pid} ({name}) to {newp['vehicle']['name']}: {path}")
+        messagebox.showinfo(APP_NAME, f"Added '{name}' to the {newp['vehicle']['name']} profile. "
+                                      "Reconnect to see it on the Dashboard.")
 
     # ------------------------------------------------------------ History
 

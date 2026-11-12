@@ -183,7 +183,11 @@ def load(path):
 
 
 def list_profiles(user_dir=None):
-    """[(path, profile)] for built-in profiles then imported ones (valid only)."""
+    """[(path, profile)] for built-in profiles then imported ones (valid only).
+
+    An imported profile with the same vehicle name as a built-in one replaces
+    it (so an edited copy, e.g. with PIDs added by the PID explorer, wins).
+    """
     out = []
     for folder in (BUILTIN_DIR, user_dir):
         if not folder or not os.path.isdir(folder):
@@ -195,7 +199,14 @@ def list_profiles(user_dir=None):
                     out.append((path, load(path)))
                 except (OSError, ProfileError):
                     continue
-    return out
+    seen = {}
+    for path, prof in out:
+        seen[prof["vehicle"]["name"]] = (path, prof)
+    order = []
+    for path, prof in out:
+        if seen[prof["vehicle"]["name"]] not in order:
+            order.append(seen[prof["vehicle"]["name"]])
+    return order
 
 
 def safe_filename(profile):

@@ -207,6 +207,12 @@ class Elm327:
                 data += ln                    # CAN continuation frames
         return obd.vin_from_bytes(data)
 
+    def mode22_raw(self, pid_hex):
+        """All data bytes of a maker-specific PID reply, or None if it doesn't answer."""
+        hi, lo = int(pid_hex[:2], 16), int(pid_hex[2:], 16)
+        data = self._payload(self.request(f"22{pid_hex}"), [0x62, hi, lo])
+        return data or None
+
     def mode22(self, pid_hex, nbytes):
         """Maker-specific PID (mode 22). Returns the data bytes or None."""
         hi, lo = int(pid_hex[:2], 16), int(pid_hex[2:], 16)

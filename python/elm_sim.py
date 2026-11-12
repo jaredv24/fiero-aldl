@@ -134,6 +134,22 @@ class SimElm:
                 s.update(o2_up1=0.86, o2_up2=0.84, stft=-14.0, rpm=s["rpm"] + 60)
         return s
 
+    # Made-up maker-specific PIDs so the PID explorer has something to find in the demo.
+    # They are NOT real GM PIDs.
+    DEMO_ENHANCED = ("1190", "11A1", "1234", "12C3")
+
+    def enhanced_bytes(self, pid, s):
+        if pid == "1190":                        # engine speed, rpm*4 (like PID 0C)
+            v = int(s["rpm"] * 4)
+            return [v >> 8 & 0xFF, v & 0xFF]
+        if pid == "11A1":                        # a status byte that never changes
+            return [0x00]
+        if pid == "1234":                        # an on/off switch the explorer can find
+            return [0x01 if getattr(self, "demo_switch", False) else 0x00]
+        if pid == "12C3":                        # coolant, deg C + 40 (like PID 05)
+            return [int(round((s["ect_f"] - 32) / 1.8 + 40))]
+        return None
+
     def pid_bytes(self, pid, s):
         def temp(f):
             return int(round((f - 32) / 1.8 + 40))
@@ -201,6 +217,9 @@ class SimElm:
         if cmd.startswith("STI"):
             return "?"
         s = self.state()
+        if cmd.startswith("22") and len(cmd) == 6:
+            data = self.enhanced_bytes(cmd[2:], s)
+            return "NO DATA" if data is None else "62" + cmd[2:] + "".join(f"{b:02X}" for b in data)
         if cmd.startswith("01") and len(cmd) == 4:
             pid = int(cmd[2:], 16)
             if pid % 0x20 == 0:
