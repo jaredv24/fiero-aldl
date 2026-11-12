@@ -359,7 +359,9 @@ class SimSource:
             self.cross = (self.cross + o2_rate) % 256
         else:
             o2_mv = 450 + random.uniform(-12, 12)
-        mat_f = 70 + (coolant_f - 70) * 0.3    # intake air near outside temperature
+        # Intake air sits near outside temperature while running; with the engine off
+        # it heat-soaks toward the coolant, so the two agree on a parked engine.
+        mat_f = 70 + (coolant_f - 70) * (0.3 if running else 0.9)
         # Byte values are the inverse of the formulas in the A29 definition.
         vals = {
             0: flags_mode,
