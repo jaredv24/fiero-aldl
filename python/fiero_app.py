@@ -41,6 +41,7 @@ import obd_source
 import obd_tests
 import obd
 import cable_check
+import checks
 import compare
 import leak_hunt
 import vacuum
@@ -52,6 +53,7 @@ DATA_DIR = os.environ.get("FIERO_ALDL_DATA") or os.path.join(
 LOG_DIR = os.path.join(DATA_DIR, "logs")
 TESTS_DIR = os.path.join(DATA_DIR, "tests")
 VEHICLES_DIR = os.path.join(DATA_DIR, "vehicles")
+CHECKS_DIR = os.path.join(DATA_DIR, "checks")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 BASELINE_PATH = os.path.join(DATA_DIR, "baseline.json")
 LAYOUT_PATH = os.path.join(DATA_DIR, "my_layout.json")
@@ -328,6 +330,7 @@ class App:
         self._build_codes_tab()
         self._build_tests_tab()
         self._build_leak_tab()
+        self._build_checks_tab()
         self._build_claude_tab()
 
         # Raw bytes
@@ -463,6 +466,7 @@ class App:
         if hasattr(self, "test_tree"):
             self.populate_tests()
         self.update_leak_spots()
+        self.refresh_checks()
 
     def refresh_ports(self):
         ports = list_serial_ports()
@@ -1203,6 +1207,105 @@ class App:
             parts.append(("Rules vary by state; check yours.\n", "muted"))
         self.codes_write(parts)
 
+    # ------------------------------------------------------------ Checks
+
+    def vehicle_name(self):
+        prof = self.vehicle_profile()
+        if prof:
+            return prof["vehicle"]["name"]
+        return "OBD-II car" if self.is_obd() else "Fiero"
+
+    def checks_store(self):
+        return checks.Store(CHECKS_DIR, self.vehicle_name())
+
+    def _build_checks_tab(self):
+        tab = ttk.Frame(self.nb, padding=10)
+        self.nb.add(tab, text="Checks")
+        self.checks_intro = ttk.Label(tab, wraplength=950, justify="left")
+        self.checks_intro.pack(anchor="w")
+        form = ttk.Frame(tab)
+        form.pack(fill="x", pady=8)
+        ttk.Label(form, text="Check:").grid(row=0, column=0, sticky="w")
+        self.check_box = ttk.Combobox(form, state="readonly", width=40)
+        self.check_box.grid(row=0, column=1, sticky="w", padx=6)
+        self.check_box.bind("<<ComboboxSelected>>", lambda e: self._check_how())
+        ttk.Label(form, text="Reading:").grid(row=0, column=2, sticky="w", padx=(12, 0))
+        self.check_value = ttk.Entry(form, width=28)
+        self.check_value.grid(row=0, column=3, sticky="w", padx=6)
+        self.check_unit = ttk.Label(form, width=9)
+        self.check_unit.grid(row=0, column=4, sticky="w")
+        ttk.Label(form, text="Note:").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.check_note = ttk.Entry(form, width=70)
+        self.check_note.grid(row=1, column=1, columnspan=3, sticky="we", padx=6, pady=(6, 0))
+        ttk.Button(form, text="Save", command=self.save_check).grid(row=1, column=4, sticky="w",
+                                                                    pady=(6, 0))
+        self.check_how = ttk.Label(tab, wraplength=950, justify="left", foreground=self.c["muted"])
+        self.check_how.pack(anchor="w")
+        cols = ("when", "check", "reading", "verdict", "explanation")
+        self.check_tree = ttk.Treeview(tab, columns=cols, show="headings", height=12)
+        for c, w, text in (("when", 130, "When"), ("check", 230, "Check"), ("reading", 150, "Reading"),
+                           ("verdict", 80, "Result"), ("explanation", 420, "What it means")):
+            self.check_tree.heading(c, text=text)
+            self.check_tree.column(c, width=w, anchor="w")
+        self.check_tree.pack(fill="both", expand=True, pady=6)
+        self.check_tree.bind("<<TreeviewSelect>>", lambda e: self._show_check())
+        ttk.Button(tab, text="Delete selected", command=self.delete_check).pack(anchor="e")
+        self.refresh_checks()
+
+    def _check_list(self):
+        return checks.for_kind("obd2" if self.is_obd() else "aldl")
+
+    def _check_how(self):
+        c = next((c for c in self._check_list() if c.name == self.check_box.get()), None)
+        self.check_how.configure(text=c.how if c else "")
+        self.check_unit.configure(text=c.unit if c else "")
+
+    def _show_check(self):
+        sel = self.check_tree.selection()
+        if sel:
+            v = self.check_tree.item(sel[0], "values")
+            self.check_how.configure(text=f"{v[1]}: {v[2]}  →  {v[3]}. {v[4]}")
+
+    def refresh_checks(self):
+        if not hasattr(self, "check_tree"):
+            return
+        names = [c.name for c in self._check_list()]
+        self.check_box.configure(values=names)
+        if self.check_box.get() not in names:
+            self.check_box.set(names[0])
+        self._check_how()
+        self.checks_intro.configure(text=(
+            f"Readings you take by hand for the {self.vehicle_name()}: fuel pressure, timing, "
+            "compression, a vacuum gauge, a multimeter. Each is compared with this car's normal "
+            "values and saved, so Claude and the session report can use them."))
+        self.check_tree.delete(*self.check_tree.get_children())
+        for e in self.checks_store().entries():
+            reading = " — ".join(x for x in (f"{e['value']} {e['unit']}".strip() if e["value"] else "",
+                                              e.get("note", "")) if x)
+            self.check_tree.insert("", "end", values=(e["when"], e["name"], reading,
+                                                      e["verdict"].upper(), e["explanation"]))
+
+    def save_check(self):
+        c = next((c for c in self._check_list() if c.name == self.check_box.get()), None)
+        value, note = self.check_value.get().strip(), self.check_note.get().strip()
+        if c is None or (not value and not note):
+            return
+        if c.id == "note" and not note:
+            note, value = value, ""
+        entry = self.checks_store().add(c.id, value, note, self.vehicle_profile())
+        self.log(f"Check saved: {entry['name']} {entry['value']} -> {entry['verdict']}")
+        self.check_value.delete(0, "end")
+        self.check_note.delete(0, "end")
+        self.refresh_checks()
+
+    def delete_check(self):
+        sel = self.check_tree.selection()
+        if not sel:
+            return
+        index = self.check_tree.index(sel[0])
+        self.checks_store().delete(index)
+        self.refresh_checks()
+
     # ------------------------------------------------------------ Leak hunt
 
     def _build_leak_tab(self):
@@ -1517,6 +1620,7 @@ class App:
         name, result, hist = self.test_results[t.id]
         summary = claude_assistant.summary_for_test(name, result, hist, self.params_by_name(),
                                                     self.baseline_baro())
+        summary += self.extra_context()
         self.nb.select(self.claude_tab)
         self.claude_start(f"[test: {name}, {result.status.upper()}] Explain this result.",
                           claude_assistant.test_question(summary, name))
@@ -1667,6 +1771,7 @@ class App:
             return
         summary = claude_assistant.summary_for_live(self.history, self.params_by_name(),
                                                     self.baseline_baro(), self.recent_results())
+        summary += self.extra_context()
         self.claude_start(f"[live data: last {len(self.history)} frames] What do you see, and "
                           "what should I check?", claude_assistant.first_question(summary, self._car_name()))
 
@@ -1679,11 +1784,18 @@ class App:
         try:
             summary = claude_assistant.summary_for_log(path, self.params_by_name(),
                                                        self.baseline_baro(), self.recent_results())
+            summary += self.extra_context()
         except (OSError, ValueError, KeyError) as e:
             messagebox.showerror(APP_NAME, f"Couldn't read that log:\n{e}")
             return
         self.claude_start(f"[log: {os.path.basename(path)}] What do you see, and what should "
                           "I check?", claude_assistant.first_question(summary, self._car_name()))
+
+    def extra_context(self):
+        """Hands-on checks, leak hunt and comparison results, for Claude."""
+        parts = [x for x in (self.checks_store().text(), self.leak_hunt_text(),
+                             self.compare_text()) if x]
+        return ("\n\n" + "\n\n".join(parts)) if parts else ""
 
     def _car_name(self):
         if not self.is_obd():
