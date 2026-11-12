@@ -41,6 +41,7 @@ import obd_source
 import obd_tests
 import obd
 import cable_check
+import compare
 import leak_hunt
 import vacuum
 
@@ -300,6 +301,8 @@ class App:
         self.an_title.pack(side="left")
         ttk.Button(top, text="Analyze a saved log…", command=self.analyze_log_file).pack(
             side="right")
+        ttk.Button(top, text="Compare before/after…", command=self.compare_logs).pack(
+            side="right", padx=6)
         self.live_btn = ttk.Button(top, text="Back to live", command=self.analysis_back_to_live)
         self.an_intro = ttk.Label(an_tab, foreground=self.c["muted"], wraplength=950)
         self.an_intro.pack(fill="x", pady=(4, 6))
@@ -974,6 +977,59 @@ class App:
         self.show_findings(f"Log: {os.path.basename(path)}  ({secs:.0f} s)", findings)
         self.live_btn.pack(side="right", padx=6)
         self.nb.select(self.an_text.master)
+
+    def compare_logs(self, before=None, after=None):
+        before = before or filedialog.askopenfilename(
+            title="Choose the BEFORE log (recorded before the fix)", initialdir=LOG_DIR,
+            filetypes=[("CSV logs", "*.csv"), ("All files", "*")])
+        if not before:
+            return
+        after = after or filedialog.askopenfilename(
+            title="Choose the AFTER log (recorded after the fix)", initialdir=LOG_DIR,
+            filetypes=[("CSV logs", "*.csv"), ("All files", "*")])
+        if not after:
+            return
+        try:
+            hb, ha = analysis.load_log(before), analysis.load_log(after)
+        except (OSError, ValueError, KeyError) as e:
+            messagebox.showerror(APP_NAME, f"Couldn't read a log:\n{e}")
+            return
+        rows, notes = compare.compare(hb, ha)
+        self.an_log = ("compare", before, after)
+        self.an_last = None
+        self.last_compare = (os.path.basename(before), os.path.basename(after), rows, notes)
+        t = self.an_text
+        t.configure(state="normal")
+        t.delete("1.0", "end")
+        self.an_title.configure(text="Before / after comparison")
+        self.an_intro.configure(text=(
+            f"Before: {os.path.basename(before)}    After: {os.path.basename(after)}. "
+            "Both logs are boiled down to warm-idle numbers and compared."))
+        t.insert("end", compare.verdict_text(rows) + "\n\n", "title")
+        tag = {compare.BETTER: analysis.OK, compare.WORSE: analysis.PROBLEM,
+               compare.SAME: analysis.INFO}
+        for r in rows:
+            t.insert("end", f"{r.name}: ", "calc_k")
+            t.insert("end", f"{compare.fmt(r.before, r.unit)} → {compare.fmt(r.after, r.unit)} "
+                            f"{r.unit}  ", "calc_v")
+            if r.verdict:
+                t.insert("end", r.verdict.upper(), tag[r.verdict])
+            t.insert("end", "\n")
+        for n in notes:
+            t.insert("end", "\n" + n + "\n", "hint")
+        t.configure(state="disabled")
+        self.live_btn.pack(side="right", padx=6)
+        self.nb.select(self.an_text.master)
+
+    def compare_text(self):
+        """Plain-text comparison for Claude and the report."""
+        if not getattr(self, "last_compare", None):
+            return ""
+        b, a, rows, notes = self.last_compare
+        lines = [f"Before/after comparison ({b} vs {a}): {compare.verdict_text(rows)}"]
+        lines += [f"- {r.name}: {compare.fmt(r.before, r.unit)} -> {compare.fmt(r.after, r.unit)} "
+                  f"{r.unit} ({r.verdict or 'n/a'})" for r in rows]
+        return "\n".join(lines + notes)
 
     def analysis_back_to_live(self):
         self.an_log = None

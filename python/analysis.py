@@ -312,9 +312,12 @@ def analyze(history, params, window=LIVE_WINDOW_S):
 
 
 def _split_column(col):
+    """'Coolant temp (F)' -> ('Coolant temp', 'F'). Parts of a name that look like
+    '(long trim)' or '(raw)' are kept as part of the name, not read as units."""
     if col.endswith(")") and " (" in col:
         name, units = col[:-1].rsplit(" (", 1)
-        return name, units
+        if " " not in units and units not in ("raw", "upstream", "downstream", "est."):
+            return name, units
     return col, None
 
 
