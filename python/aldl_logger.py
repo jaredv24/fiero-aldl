@@ -282,7 +282,7 @@ class SimSource:
         phase = (t % 6.0) / 6.0
         rpm = 1150 - 550 * phase + random.uniform(-25, 25)
         iac = 15 + 80 * phase
-        map_v = 1.3 + 0.3 * phase
+        map_v = 1.2 + 0.5 * phase              # vacuum sags as the idle sags
         spark_deg = 12 + 6 * phase
         tps = 0.52
         speed = 0

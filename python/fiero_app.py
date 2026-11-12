@@ -41,6 +41,7 @@ import obd_source
 import obd_tests
 import obd
 import cable_check
+import vacuum
 
 APP_NAME = "Fiero ALDL"
 RES_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
@@ -107,7 +108,7 @@ def _is_blank_layout(path):
             params = json.load(f).get("parameters", [])
     except (OSError, ValueError):
         return False
-    return bool(params) and all(p.get("offset") is None for p in params)
+    return bool(params) and all(p.get("offset") is None for p in params if not p.get("derived"))
 
 
 def list_serial_ports():
@@ -187,7 +188,8 @@ class App:
         self.reader = None
         self.checking = False
         self.recording = None  # (csv_file, writer, names, capture_file, csv_path)
-        self.definition = al.load_definition(DEMO_DEF)
+        self.definition = vacuum.add_param(al.load_definition(DEMO_DEF))
+        self.vac = vacuum.Tracker()
         self.frames = 0
         self.last_frame = None
         self.byte_stats = {}
@@ -407,7 +409,7 @@ class App:
             return
         path = DEMO_DEF if self.source_var.get() == SRC_DEMO else LAYOUT_PATH
         try:
-            self.definition = al.load_definition(path)
+            self.definition = vacuum.add_param(al.load_definition(path))
         except (OSError, ValueError) as e:
             messagebox.showerror(APP_NAME, f"Couldn't read the byte layout:\n{path}\n\n{e}")
             self.definition = al.load_definition(TEMPLATE_DEF)
@@ -695,7 +697,8 @@ class App:
             p.setdefault("decimals", 1)
             p.setdefault("offset", 0)
             p.setdefault("units", p.get("unit", ""))
-        self.definition = d
+        self.definition = vacuum.add_param(d)
+        self.vac = vacuum.Tracker()
         self.build_tiles()
         names = [p["name"] for p in d["parameters"]]
         for v, cb in self.chart_vars:
@@ -717,6 +720,10 @@ class App:
         """One sample from any source: update tiles, history, tests, recording."""
         self.frames += 1
         elapsed = time.time() - self.t0
+        if not self.vac.checked_baseline and self.definition.get("type") != "obd2":
+            self.vac.checked_baseline = True
+            self.vac.baro_v = self.vac.baro_v or self.baseline_baro()
+        self.vac.update(values)
         self.show_ecm_status(frame, codes, flags)
         params = {p["name"]: p for p in self.definition["parameters"]}
         rows = [(n, values.get(n), p.get("units", ""), p) for n, p in params.items()]
@@ -774,6 +781,9 @@ class App:
 
     def tile_normal(self, p):
         """'normal 4–6 g/s · warm idle' for a dashboard tile, from the vehicle's profile."""
+        if p["name"] == vacuum.NAME:
+            lo, hi = vacuum.NORMAL_IDLE_INHG
+            return f"normal {lo:.0f}–{hi:.0f} inHg · warm idle, sea level"
         if self.definition.get("type") == "obd2":
             n = obd_analysis.normal(self.vehicle_profile(), p.get("signal"))
             if n and (n.get("low") is not None or n.get("high") is not None):
@@ -805,12 +815,13 @@ class App:
             if ntext:
                 ttk.Label(box, foreground=self.c["muted"], font=("Helvetica", 11),
                           text=ntext).pack(anchor="w")
-            if p["offset"] is None:
+            if p["offset"] is None and not p.get("derived"):
                 ttk.Label(box, text="not mapped yet", foreground=self.c["muted"]).pack(anchor="w")
             self.tiles[p["name"]] = {"value": value, "bar": bar}
         for c in range(cols):
             self.tile_frame.columnconfigure(c, weight=1)
-        missing = sum(p["offset"] is None for p in self.definition["parameters"])
+        missing = sum(p["offset"] is None and not p.get("derived")
+                      for p in self.definition["parameters"])
         if missing:
             self.banner.configure(text=(
                 f"{missing} of {len(self.definition['parameters'])} values aren't mapped to a "
@@ -893,6 +904,7 @@ class App:
                         findings = obd_analysis.analyze(hist, self.vehicle_profile())
                     else:
                         findings = analysis.analyze(hist, self.params_by_name())
+                    findings = findings + vacuum.findings(hist)
                     self.an_calc = derived.calculated(hist, self.baseline_baro())
                     title = f"Live: last {analysis.LIVE_WINDOW_S} seconds"
                 else:
@@ -946,6 +958,7 @@ class App:
             findings = obd_analysis.analyze(hist, self.vehicle_profile(), window=None)
         else:
             findings = analysis.analyze(hist, params, window=None)
+        findings = findings + vacuum.findings(hist)
         self.an_calc = derived.calculated(hist, self.baseline_baro())
         secs = hist[-1][0] - hist[0][0] if hist else 0
         self.an_log = path
