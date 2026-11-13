@@ -22,7 +22,7 @@ class VacuumMathTests(unittest.TestCase):
 
     def test_volts_estimate(self):
         self.assertAlmostEqual(vacuum.from_volts(4.6, 4.6), 0)
-        self.assertAlmostEqual(vacuum.from_volts(1.38, 4.6), 20.9, places=1)
+        self.assertAlmostEqual(vacuum.from_volts(1.38, 4.6), 18.07, places=1)   # GM 1-bar slope
         self.assertIsNone(vacuum.from_volts(1.4, None))
 
     def test_tracker_learns_baro_with_engine_off(self):
@@ -33,7 +33,7 @@ class VacuumMathTests(unittest.TestCase):
         self.assertAlmostEqual(v[vacuum.NAME], 0)
         v = {"MAP": 1.32, "Engine RPM": 800}
         t.update(v)
-        self.assertAlmostEqual(v[vacuum.NAME], 20.9, places=1)
+        self.assertAlmostEqual(v[vacuum.NAME], 17.28, places=1)
         v = {"MAP": 31, "Engine RPM": 760, "Barometric pressure": 101}
         t.update(v)
         self.assertAlmostEqual(v[vacuum.NAME], 20.67, places=2)

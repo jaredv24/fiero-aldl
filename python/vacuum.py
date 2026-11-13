@@ -5,9 +5,9 @@ atmospheric pressure minus MAP:
 - OBD-II cars report MAP in kPa (and often barometric pressure too), so the
   result is direct: inHg = (baro - MAP) kPa x 0.2953.
 - The Fiero's ECM only gives MAP sensor volts. Using the key-on engine-off
-  reading as "atmosphere" and treating the sensor as proportional to
-  pressure gives an ESTIMATE: inHg ~= baro_inHg x (1 - MAP_V / baro_V).
-  GM's 1-bar sensor isn't exactly proportional, so read it as a guide.
+  reading as "atmosphere" and GM's 1-bar sensor slope (about 19 kPa per
+  volt) gives an ESTIMATE: inHg ~= (baro_V - MAP_V) x 19 x 0.2953.
+  Sensor tolerance makes it a guide (+/- 1-2 inHg), not a gauge.
 
 Negative vacuum means the manifold is above atmospheric: boost on a
 supercharged engine like the Grand Prix GTP.
@@ -34,11 +34,17 @@ def from_kpa(map_kpa, baro_kpa=None):
     return ((baro_kpa or SEA_LEVEL_KPA) - map_kpa) * INHG_PER_KPA
 
 
+# GM's 1-bar MAP sensor changes about 19 kPa per volt (roughly 10 kPa at 0 V,
+# 105 kPa at 4.9 V), so it is NOT proportional to pressure: the volts it loses
+# from the engine-off reading are what count.
+KPA_PER_VOLT = 19.0
+
+
 def from_volts(map_v, baro_v):
     """Estimated inHg of vacuum from MAP volts and the engine-off MAP volts."""
     if not baro_v:
         return None
-    return SEA_LEVEL_INHG * (1 - map_v / baro_v)
+    return (baro_v - map_v) * KPA_PER_VOLT * INHG_PER_KPA
 
 
 def boost_psi(inhg):
