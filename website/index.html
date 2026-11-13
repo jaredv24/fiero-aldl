@@ -162,7 +162,7 @@ canvas { display: block; width: 100%; height: 190px; }
 .mono { font-family: var(--font-mono); font-size: 0.9em; }
 
 /* steps */
-.steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; counter-reset: step; }
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; counter-reset: step; }
 .step { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; gap: 8px; align-content: start; }
 .step::before { counter-increment: step; content: "Step " counter(step); font: 500 0.76rem/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
 .step p { color: var(--muted); font-size: 0.95rem; }
@@ -180,6 +180,16 @@ canvas { display: block; width: 100%; height: 190px; }
   .tile .v { font-size: 1.8rem; }
   .wrap { gap: 56px; padding-block: 28px 48px; }
 }
+.leak { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--panel-line); }
+.leak[hidden] { display: none; }
+.leak-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.leak select { flex: 1 1 180px; min-width: 0; font: 500 0.86rem/1 var(--font-body); color: var(--panel-fg); background: var(--panel-2); border: 1px solid var(--panel-line); border-radius: 8px; padding: 8px; }
+.leak-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 0.86rem; }
+.leak-list li { display: flex; gap: 8px; justify-content: space-between; color: var(--panel-muted); }
+.leak-list li b { color: var(--panel-fg); font-weight: 500; }
+.leak-list .yes { color: var(--bad); } .leak-list .no { color: var(--good); } .leak-list .wait { color: var(--info); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+code { font-family: var(--font-mono); font-size: 0.9em; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
 </style>
 
@@ -187,15 +197,15 @@ canvas { display: block; width: 100%; height: 190px; }
 <body>
 <div class="wrap">
   <header class="hero">
-    <div class="eyebrow">Mac app · free · v0.1.0</div>
-    <h1>See what your Fiero's engine computer sees.</h1>
-    <p class="lede">Fiero ALDL turns the diagnostic plug under the dash into a live dashboard on your Mac: gauges, trouble codes in plain English, a chart of what the engine is doing, and a checkup that tells you where to look. Built for chasing problems like an idle that won't settle.</p>
+    <div class="eyebrow">Mac app · free · v0.4</div>
+    <h1>See what your engine computer sees.</h1>
+    <p class="lede">Fiero ALDL turns the diagnostic plug under the dash into a diagnostic bench on your Mac: live gauges, trouble codes in plain English, guided tests, a leak hunt, a stall recorder that catches the moment the engine dies, and a checkup that tells you where to look. Built for the 1985–88 Fiero V6, and works with any 1996-or-newer car through an OBD-II adapter.</p>
     <div class="cta">
-      <a class="btn primary" href="https://github.com/jaredv24/fiero-aldl/releases/download/v0.1.0/Fiero-ALDL-apple-silicon.zip">Download for Mac <small>Apple Silicon</small></a>
-      <a class="btn" href="https://github.com/jaredv24/fiero-aldl/releases/download/v0.1.0/Fiero-ALDL-intel.zip">Intel Mac</a>
+      <a class="btn primary" href="https://github.com/jaredv24/fiero-aldl/releases/latest/download/Fiero-ALDL-apple-silicon.zip">Download for Mac <small>Apple Silicon</small></a>
+      <a class="btn" href="https://github.com/jaredv24/fiero-aldl/releases/latest/download/Fiero-ALDL-intel.zip">Intel Mac</a>
       <a class="btn" href="#demo">Try the demo</a>
     </div>
-    <div class="spec"><span>1985–88 Fiero 2.8 V6 (L44)</span><span>ECM 1227170</span><span>GM data stream A29</span><span>160 baud, pin E</span></div>
+    <div class="spec"><span>1985–88 Fiero 2.8 V6 (L44)</span><span>ECM 1227170, 160 baud ALDL</span><span>OBD-II cars via ELM327 / OBDLink</span><span>2002 Grand Prix GTP profile</span></div>
   </header>
 
   <section class="demo" id="demo" aria-label="Live demo">
@@ -206,6 +216,7 @@ canvas { display: block; width: 100%; height: 190px; }
           <button type="button" id="sc-hunt" data-scenario="hunt" aria-pressed="true">Hunting idle</button>
           <button type="button" id="sc-ok" data-scenario="ok" aria-pressed="false">Healthy</button>
           <button type="button" id="sc-egr" data-scenario="egr" aria-pressed="false">EGR fault</button>
+          <button type="button" id="sc-stall" data-scenario="stall" aria-pressed="false">Dies at idle</button>
         </div>
         <button type="button" class="pbtn" id="pause" aria-pressed="false">Pause</button>
       </div>
@@ -215,30 +226,48 @@ canvas { display: block; width: 100%; height: 190px; }
       <div class="left">
         <div class="tiles" id="tiles"></div>
         <div class="chartbox">
-          <div class="chartlabel"><span>Last 60 seconds</span><span><span style="color:var(--amber)">■</span> RPM &nbsp; <span style="color:var(--cyan)">■</span> IAC steps</span></div>
-          <canvas id="chart" aria-label="Chart of engine RPM and idle air control position over the last 60 seconds" role="img"></canvas>
+          <div class="chartlabel"><span>Last 60 seconds</span><span><span style="color:var(--amber)">■</span> RPM &nbsp; <span style="color:var(--cyan)">■</span> Vacuum inHg</span></div>
+          <canvas id="chart" aria-label="Chart of engine RPM and estimated manifold vacuum over the last 60 seconds" role="img"></canvas>
         </div>
       </div>
       <div class="right">
         <div class="findings-h"><h3>Analysis</h3><span>last 30 s</span></div>
         <ul class="findings" id="findings"></ul>
+        <div class="leak" id="leak">
+          <div class="findings-h"><h3>Leak hunt</h3><span>spray one spot, then watch</span></div>
+          <div class="leak-row">
+            <label class="sr" for="spot">Spot to spray</label>
+            <select id="spot">
+              <option>EGR block-off plate</option><option>Throttle body base gasket</option>
+              <option>Brake booster hose</option><option>PCV valve and hose</option>
+              <option>Intake plenum gasket</option>
+            </select>
+            <button type="button" class="pbtn" id="spray">Spray here</button>
+          </div>
+          <ul class="leak-list" id="leaklist"></ul>
+        </div>
       </div>
     </div>
-    <div class="demo-foot">This is the app's demo mode running in your browser: the numbers are simulated, not from a real car. In the app, the same screens fill with live data from your ECM.</div>
+    <div class="demo-foot">"Dies at idle" shows the stall recorder: when the engine dies, the app keeps the 30 seconds before it and labels the death. In "Hunting idle", one sprayed spot leaks. This is the app's demo mode running in your browser: the numbers are simulated, not from a real car. In the app, the same screens fill with live data from your ECM.</div>
   </section>
 
   <section class="section">
     <header>
       <div class="eyebrow">What it does</div>
-      <h2>Everything the old scan tools showed, plus a second opinion</h2>
+      <h2>A whole diagnostic bench, not just a gauge cluster</h2>
     </header>
     <div class="features">
-      <div class="feature"><h3>Live dashboard</h3><p>RPM, coolant, throttle, MAP, O2, idle air control, fuel trims, spark advance, EGR and battery, decoded with GM's own formulas for your engine.</p></div>
-      <div class="feature"><h3>Trouble codes, named</h3><p>Codes 12 through 55 show up by name the moment the ECM sets them. No more counting Check Engine blinks.</p></div>
-      <div class="feature"><h3>The 60-second chart</h3><p>Watch RPM sag and the idle air valve chase it. A surging idle is obvious on a chart in a way it never is on a needle.</p></div>
-      <div class="feature"><h3>Automatic checkup</h3><p>Flags a hunting idle, a stalling dip, an idle valve that's shut or maxed out, lean or rich running, open loop on a warm engine, and bad sensor readings, with the usual causes.</p></div>
-      <div class="feature"><h3>Record and replay</h3><p>Save a cold start or a stall as a log you can open in Excel, analyze later, or send to someone who knows these cars.</p></div>
-      <div class="feature"><h3>Ask Claude</h3><p>Optional. Sends a summary of your readings to Claude, which explains what it sees and what to check first. Follow-up questions welcome.</p></div>
+      <div class="feature"><h3>Live dashboard and chart</h3><p>RPM, coolant, throttle, MAP, O2, idle air, fuel trims, spark, EGR and battery, decoded with GM's formulas, with a 60-second chart and normal ranges on every gauge.</p></div>
+      <div class="feature"><h3>Vacuum from the MAP sensor</h3><p>A vacuum gauge without the gauge. The checkup reads the idle pattern the way a mechanic reads the needle: steady, low, drifting with the hunt, or flickering.</p></div>
+      <div class="feature"><h3>Stall recorder</h3><p>Always on. When the engine dies, the last 30 seconds are saved and labeled: ignition signal lost, ran lean and died, power dropout, or a slow sag.</p></div>
+      <div class="feature"><h3>Leak hunt</h3><p>Spray one spot at a time and press a button. The app watches the O2 sensor, fuel trim and idle after each spray and ranks the spots that reacted.</p></div>
+      <div class="feature"><h3>Guided tests</h3><p>Step-by-step tests you can run in the driveway: key-on sensor checks, throttle sweep, warm-up, idle stability, A/C and steering load, a 2000 rpm hold, a road test.</p></div>
+      <div class="feature"><h3>Trouble codes, named</h3><p>Fiero codes by name the moment the ECM sets them. On OBD-II cars: stored, pending and permanent codes, freeze frame, readiness monitors and VIN.</p></div>
+      <div class="feature"><h3>Checks, history and before/after</h3><p>Log fuel pressure, timing, compression and repairs, see every test and check over time, and compare a log from before a fix with one from after.</p></div>
+      <div class="feature"><h3>Any car, with its own normals</h3><p>Works with 1996-and-newer cars through an ELM327-style adapter such as the OBDLink SX. Vehicle profiles hold each car's normal values, with sources; Claude can research one for your car.</p></div>
+      <div class="feature"><h3>GM PID explorer</h3><p>Finds the extra readings GM computers answer beyond generic OBD-II and works out what they are by watching them while you rev the engine or switch on the A/C. Read-only.</p></div>
+      <div class="feature"><h3>Session report</h3><p>One page with charts, findings, codes, tests, leak hunt and stall captures, to print or send to someone who knows these cars.</p></div>
+      <div class="feature"><h3>Ask Claude</h3><p>Optional. Claude reads your live data, codes, stall captures, checks and history itself, can start a guided test for you, and explains what to check first. It can't change anything on the car.</p></div>
     </div>
   </section>
 
@@ -246,7 +275,7 @@ canvas { display: block; width: 100%; height: 190px; }
     <div class="copy">
       <div class="eyebrow">Ask Claude</div>
       <h2>A mechanic's eye on your actual numbers</h2>
-      <p>Click one button and Claude gets the readings, trouble codes, ECM status and the checkup results. It ranks the likely causes, quotes the numbers behind each one, and puts the cheap checks first.</p>
+      <p>Ask a question and Claude looks things up in the app on its own: the live readings, trouble codes, stall captures, the checks you've recorded and the car's history. It can start a guided test and tell you what to do at the car. It ranks the likely causes, quotes the numbers behind each one, and puts the cheap checks first.</p>
       <p>Uses your own Anthropic API key, stored in the Mac Keychain. A question usually costs a few cents. Nothing is sent until you click.</p>
     </div>
     <div class="chat">
@@ -275,15 +304,16 @@ canvas { display: block; width: 100%; height: 190px; }
       <h2>From download to live data</h2>
     </header>
     <div class="steps">
-      <div class="step"><h3>Try the demo</h3><p>Download the app, open it, pick <b>Demo (no car)</b> and click <b>Connect</b>. Every screen works with no hardware.</p></div>
+      <div class="step"><h3>Try the demo</h3><p>Download the app, open it, pick <b>Demo: Fiero</b> or <b>Demo: Grand Prix</b> and click <b>Connect</b>. Every screen works with no hardware.</p></div>
       <div class="step"><h3>Plug in a cable</h3><p>Get a GM 12-pin ALDL to USB cable that reads <b>160 baud on pin E</b>. Turn its 10k switch on, plug it in under the dash, key on.</p></div>
       <div class="step"><h3>Check the cable</h3><p>Choose <b>USB ALDL cable</b> and click <b>Check cable</b>. It finds the right settings and confirms the Fiero's 25-byte frames.</p></div>
+      <div class="step"><h3>Newer car?</h3><p>Plug an OBD-II adapter such as the OBDLink SX into the port under the dash, choose <b>OBD-II adapter</b> and pick your car under <b>Vehicles</b>.</p></div>
     </div>
   </section>
 
   <footer class="fine">
-    <p><strong>Early release.</strong> The readings follow GM's data stream specification for this engine and are tested against simulated signals. They haven't been checked on a real car yet.</p>
-    <p><strong>First open on a Mac:</strong> the app isn't signed by Apple, so macOS blocks it once. Click Done, then System Settings → Privacy &amp; Security → Open Anyway.</p>
+    <p><strong>Early release.</strong> The Fiero readings follow GM's data stream specification for this engine, and the OBD-II side follows the SAE standard. Both are tested against simulated cars. They haven't been checked on a real car yet.</p>
+    <p><strong>First open on a Mac:</strong> the app isn't signed by Apple, so macOS blocks it. Drag it to Applications, then run this once in Terminal: <code>xattr -dr com.apple.quarantine "/Applications/Fiero ALDL.app"</code></p>
     <p>Fiero ALDL is an independent hobby project. Source, wiring guide and releases: <a href="https://github.com/jaredv24/fiero-aldl">github.com/jaredv24/fiero-aldl</a></p>
   </footer>
 </div>
@@ -302,8 +332,12 @@ canvas { display: block; width: 100%; height: 190px; }
     { key: "clt", name: "Coolant", unit: "°F", dec: 0, lo: 40, hi: 230 },
     { key: "map", name: "MAP", unit: "V", dec: 2, lo: 0, hi: 5 },
     { key: "o2", name: "O2 sensor", unit: "mV", dec: 0, lo: 0, hi: 1000 },
-    { key: "blm", name: "Long trim (BLM)", unit: "", dec: 0, lo: 100, hi: 156 }
+    { key: "blm", name: "Long trim (BLM)", unit: "", dec: 0, lo: 100, hi: 156 },
+    { key: "vac", name: "Vacuum (est.)", unit: "inHg", dec: 1, lo: 0, hi: 25 }
   ];
+  var BARO_V = 4.6;             // MAP volts with the engine off
+  var sprays = [];              // {t, spot}
+  var LEAKY = "EGR block-off plate";
 
   function rnd(a) { return (Math.random() * 2 - 1) * a; }
 
@@ -327,6 +361,21 @@ canvas { display: block; width: 100%; height: 190px; }
       v.map = 1.12 + 0.02 * Math.sin(t);
       v.o2 = o2(3.2, 470, 360);
       v.blm = 128 + 2 * Math.sin(t / 5);
+    } else if (sc === "stall") {
+      // Idles, then the ignition reference drops out every 34 s: RPM reads 0 at once
+      // while the manifold still holds vacuum for a moment. Restarts after 6 s.
+      var cyc = t % 34;
+      v.rpm = 820 + 30 * Math.sin(t * 1.1) + rnd(15);
+      v.iac = 36 + 3 * Math.sin(t / 2);
+      v.map = 1.48 + 0.03 * Math.sin(t);
+      v.o2 = o2(3, 470, 360);
+      v.blm = 131 + rnd(1);
+      v.codes = [[22, "Throttle position sensor low"]];
+      if (cyc >= 26) {
+        v.rpm = 0; v.iac = 40; v.o2 = 440 + rnd(10);
+        v.map = cyc < 26.6 ? 1.52 : 4.6;
+        v.dead = true;
+      }
     } else {
       v.rpm = 720 + 140 * Math.sin(t * 1.3) + rnd(60);
       v.iac = 4 + rnd(1);
@@ -335,8 +384,13 @@ canvas { display: block; width: 100%; height: 190px; }
       v.blm = 121 + rnd(1);
       v.codes = [[32, "Exhaust gas recirculation (EGR) failure"]];
     }
-    v.closed = warm;
+    if (sc === "hunt" && sprays.some(function (sp) {
+          return sp.spot === LEAKY && t - sp.t >= 1.5 && t - sp.t <= 6.5; })) {
+      v.o2 = 860 + rnd(15); v.rpm += 140;          // spray drawn in: runs rich, idle picks up
+    }
+    v.closed = warm && !v.dead;
     v.pn = true;
+    v.vac = Math.max(0, 29.92 * (1 - v.map / BARO_V));
     return v;
   }
 
@@ -352,6 +406,21 @@ canvas { display: block; width: 100%; height: 190px; }
       out.push({ sev: "problem", t: "ECM trouble code " + c + ": " + codes[c],
                  d: "Reported by the ECM in the data stream. Fix codes first; they often explain the symptoms." });
     });
+    for (var i = 1; i < rows.length; i++) {
+      var a = rows[i - 1].v, b = rows[i].v;
+      if (a.rpm > 350 && b.rpm < 50) {
+        out.push(b.map < 2.5
+          ? { sev: "problem", t: "Engine died: ignition signal lost",
+              d: "RPM went from " + Math.round(a.rpm) + " to 0 in one reading while the manifold still held " +
+                 Math.round(29.92 * (1 - b.map / BARO_V)) + " inHg of vacuum: the engine was still turning when the " +
+                 "computer stopped seeing ignition pulses. Check the distributor's pickup coil and ignition module." }
+          : { sev: "problem", t: "Engine died", d: "RPM fell from " + Math.round(a.rpm) + " to 0." });
+        break;
+      }
+    }
+    if (last0(rows).dead) return sortF(out.concat([{ sev: "info", t: "Engine stopped",
+      d: "The stall recorder saved the 30 seconds before it died. Restarting…" }]));
+    rows = rows.filter(function (r) { return !r.v.dead; });
     var rpm = rows.map(function (r) { return r.v.rpm; });
     var iac = rows.map(function (r) { return r.v.iac; });
     var lo = Math.min.apply(null, rpm), hi = Math.max.apply(null, rpm), span = hi - lo;
@@ -364,6 +433,12 @@ canvas { display: block; width: 100%; height: 190px; }
                  d: "The ECM has closed off its idle air and the engine still gets too much: look for a vacuum leak or an EGR valve stuck open." });
     if (Math.max.apply(null, iac) >= 140)
       out.push({ sev: "problem", t: "Idle air valve near its maximum", d: "Dirty throttle body or IAC passage, or a fuel or ignition problem." });
+    var vac = rows.map(function (r) { return r.v.vac; });
+    var vlo = Math.min.apply(null, vac), vhi = Math.max.apply(null, vac), vmean = vac.reduce(function (a, b) { return a + b; }, 0) / vac.length;
+    if (vhi - vlo >= 2 && span > 300) out.push({ sev: "watch", t: "Vacuum drifts with the idle hunt",
+      d: "Vacuum swings " + vlo.toFixed(1) + "–" + vhi.toFixed(1) + " inHg in step with RPM; a healthy idle holds a steady 17–21. Points to a vacuum leak or a mixture problem: try the leak hunt." });
+    else if (vmean < 16) out.push({ sev: "watch", t: "Idle vacuum is low (" + vmean.toFixed(1) + " inHg)",
+      d: "Steady but below the usual 17–21 inHg: a vacuum leak or late ignition timing." });
     var last = rows[rows.length - 1].v;
     if (!last.closed) {
       out.push({ sev: "info", t: "O2 checks wait for a warm engine", d: "Coolant is " + Math.round(last.clt) + " °F; they start above 160 °F." });
@@ -378,6 +453,10 @@ canvas { display: block; width: 100%; height: 190px; }
     else if (blm <= 106) out.push({ sev: "problem", t: "ECM pulling lots of fuel (trim " + Math.round(blm) + ")", d: "Points to a leaking injector or a bad sensor reading." });
     if (!out.some(function (f) { return f.sev === "problem" || f.sev === "watch"; }))
       out.push({ sev: "ok", t: "Nothing out of the ordinary", d: "Idle steady around " + Math.round(median(rpm)) + " rpm; checked values are within typical ranges." });
+    return sortF(out);
+  }
+  function last0(rows) { return rows[rows.length - 1].v; }
+  function sortF(out) {
     var order = { problem: 0, watch: 1, ok: 2, info: 3 };
     return out.sort(function (a, b) { return order[a.sev] - order[b.sev]; });
   }
@@ -415,7 +494,7 @@ canvas { display: block; width: 100%; height: 190px; }
     parts.push(v.codes.length
       ? '<span class="chip code">Code ' + v.codes.map(function (c) { return c[0]; }).join(", ") + '</span>'
       : '<span class="chip on">Trouble codes: none</span>');
-    parts.push('<span class="chip' + (v.closed ? ' on' : '') + '">' + (v.closed ? "Closed loop" : "Open loop (warming up)") + '</span>');
+    parts.push('<span class="chip' + (v.closed ? ' on' : '') + '">' + (v.dead ? "Engine off" : v.closed ? "Closed loop" : "Open loop (warming up)") + '</span>');
     if (v.pn) parts.push('<span class="chip">Park/Neutral</span>');
     parts.push('<span class="chip">ALDL 10k mode</span>');
     var html = parts.join("");
@@ -455,7 +534,7 @@ canvas { display: block; width: 100%; height: 190px; }
     var grid = cssVar("--panel-line"), muted = cssVar("--panel-muted");
     var series = [
       { key: "rpm", lo: 0, hi: 2000, color: cssVar("--amber"), ticks: [0, 1000, 2000] },
-      { key: "iac", lo: 0, hi: 160, color: cssVar("--cyan"), ticks: [0, 80, 160] }
+      { key: "vac", lo: 0, hi: 25, color: cssVar("--cyan"), ticks: [0, 10, 20] }
     ];
     var now = state.hist.length ? state.hist[state.hist.length - 1].t : 0;
     c.font = "500 11px " + cssVar("--font-mono");
@@ -497,11 +576,40 @@ canvas { display: block; width: 100%; height: 190px; }
     renderStatus(v);
     renderFindings();
     drawChart();
+    renderLeaks();
     clockEl.textContent = "simulated · t = " + Math.floor(state.t) + " s";
   }
 
+  // ---- leak hunt: compare the seconds after a spray with the seconds before
+  var leakEl = document.getElementById("leak"), leakList = document.getElementById("leaklist");
+  function judge(sp) {
+    if (state.t < sp.t + 9) return { cls: "wait", txt: "watching…" };
+    var before = state.hist.filter(function (r) { return r.t >= sp.t - 6 && r.t < sp.t; });
+    var after = state.hist.filter(function (r) { return r.t >= sp.t + 1 && r.t <= sp.t + 9; });
+    function mean(a) { return a.reduce(function (x, y) { return x + y; }, 0) / (a.length || 1); }
+    var rise = mean(after.map(function (r) { return r.v.o2; })) - mean(before.map(function (r) { return r.v.o2; }));
+    return rise > 150 ? { cls: "yes", txt: "REACTED: O2 went rich" } : { cls: "no", txt: "no change" };
+  }
+  function renderLeaks() {
+    leakEl.hidden = state.scenario !== "hunt";
+    var html = sprays.map(function (sp) {
+      var j = judge(sp);
+      return '<li><b></b><span class="' + j.cls + '">' + j.txt + '</span></li>';
+    }).join("");
+    if (leakList.dataset.h !== html) {
+      leakList.dataset.h = html; leakList.innerHTML = html;
+      leakList.querySelectorAll("b").forEach(function (b, i) { b.textContent = sprays[i].spot; });
+    }
+  }
+  document.getElementById("spray").addEventListener("click", function () {
+    if (state.paused) { pauseBtn.click(); }
+    sprays.push({ t: state.t, spot: document.getElementById("spot").value });
+    if (sprays.length > 5) sprays.shift();
+    renderLeaks();
+  });
+
   function reset(sc) {
-    state.scenario = sc; state.t = 0; state.hist = []; lastFindings = "";
+    state.scenario = sc; state.t = 0; state.hist = []; lastFindings = ""; sprays = []; renderLeaks();
     // Pre-fill 60 s so the page opens with a full chart and real findings.
     for (var i = 0; i < 120; i++) {
       state.t += STEP;
