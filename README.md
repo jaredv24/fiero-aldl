@@ -126,6 +126,12 @@ knock, and one-frame sensor glitches that point to bad wiring.
   vehicle profile's normal or a labeled general rule and saved per vehicle.
 - **History** tab: every guided test and check for the car, with results that changed and
   numbers that moved over time.
+- **Stalls** tab: always on while connected. The app keeps the last 30 seconds, and when the
+  engine dies it saves that window and labels the death: *reference lost* (RPM gone in one
+  reading while there's still vacuum: ignition pickup or module), *lean then died* (O2 lean
+  and the computer adding fuel before RPM fell: fuel delivery), *power dropout* (data gap or
+  voltage dip: computer power or grounds) or *slow sag* (air or idle control). Open a capture
+  in Analysis or ask Claude about it. The Fiero demo can die each way.
 - **Save report**: one HTML page with charts, findings, codes, test results, leak hunt,
   comparison, history and Claude's answers. Open it in a browser, print it or send it.
 
@@ -381,7 +387,7 @@ You can type these in the Arduino Serial Monitor at 115200 baud:
 ## Tests
 
 ```bash
-cd python && python -m unittest test_aldl_logger test_cable test_analysis test_claude_assistant test_derived test_guided_tests test_vehicle_profile test_obd test_vacuum test_compare test_checks test_history test_report test_claude_agent test_pid_explorer -v
+cd python && python -m unittest test_aldl_logger test_cable test_analysis test_claude_assistant test_derived test_guided_tests test_vehicle_profile test_obd test_vacuum test_compare test_checks test_history test_report test_claude_agent test_pid_explorer test_stall_capture -v
 ```
 
 ```bash

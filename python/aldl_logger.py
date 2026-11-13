@@ -240,7 +240,7 @@ class SimSource:
 
     # Behaviours the guided tests can ask for (Step.demo_mode).
     MODES = ("idle", "off", "tps_up", "tps_floor", "tps_down", "ac_on", "steer",
-             "drive_idle", "rpm2000", "drive", "stall")
+             "drive_idle", "rpm2000", "drive", "stall", "stall_ref", "stall_fuel")
 
     def __init__(self, interval=0.5):
         self.interval = interval
@@ -258,6 +258,7 @@ class SimSource:
         if mode in self.MODES and mode != self.mode:
             self.mode = mode
             self.mode_t0 = (time.time() - self.t0) if t is None else t
+            self._stalled = False
 
     def spray(self, spot, t=None):
         """Leak hunt demo: spray at a spot. One spot on this fake engine leaks."""
@@ -345,6 +346,23 @@ class SimSource:
                 rpm, spark_deg = 0, 0
                 map_v = 4.6
 
+        fuel_starved = False
+        if mode == "stall_ref":
+            # Ignition reference drops out at 8 s: the computer reads 0 rpm at once
+            # while the engine is still spinning down with vacuum in the manifold.
+            if mt >= 8:
+                running, rpm, spark_deg = False, 0, 0
+                map_v = 1.5 if mt < 8.9 else 4.6
+        elif mode == "stall_fuel":
+            # Fuel delivery fails at 5 s: lean first, then rpm sinks and it dies.
+            if mt >= 5:
+                fuel_starved = True
+            if mt >= 7:
+                rpm = max(0.0, 900 - (mt - 7) * 450)
+                map_v = 1.3 + min(3.3, (mt - 7) * 1.3)
+                if rpm == 0:
+                    running, spark_deg, map_v, fuel_starved = False, 0, 4.6, False
+
         if self._coolant is None:
             self._coolant = min(195.0, 70 + t * 3)     # as if idling since t = 0
         elif self._last_t is not None:
@@ -364,6 +382,9 @@ class SimSource:
             self.cross = (self.cross + o2_rate) % 256
         else:
             o2_mv = 450 + random.uniform(-12, 12)
+        if fuel_starved:
+            o2_mv = 110 + random.uniform(-15, 15)
+            integ = min(160, 128 + (mt - 5) * 9)
         if running and self.sprays:
             import leak_hunt
             if leak_hunt.demo_reaction(self.sprays, t, leak_hunt.DEMO_LEAKS["aldl"]):

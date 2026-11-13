@@ -99,6 +99,11 @@ def build(data):
             out.append(svg_chart(pts, title, unit))
     if data.get("codes"):
         out.append(f"<h2>Trouble codes</h2><pre>{esc(data['codes'].strip())}</pre>")
+    if data.get("stalls"):
+        out.append("<h2>Stall captures</h2>")
+        for when_, verdict, evidence, check in data["stalls"]:
+            out.append(f"<div class='card'>{tag(verdict, 'problem')}<b>{esc(when_)}</b>"
+                       f"<div>{esc(evidence)}</div><div class='muted'><i>What to check: {esc(check)}</i></div></div>")
     if data.get("tests"):
         out.append("<h2>Guided tests this session</h2>")
         for name, status, headline, details in data["tests"]:

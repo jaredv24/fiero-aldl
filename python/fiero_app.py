@@ -47,6 +47,7 @@ import checks
 import compare
 import history
 import report
+import stall_capture
 import leak_hunt
 import vacuum
 
@@ -59,6 +60,7 @@ TESTS_DIR = os.path.join(DATA_DIR, "tests")
 VEHICLES_DIR = os.path.join(DATA_DIR, "vehicles")
 CHECKS_DIR = os.path.join(DATA_DIR, "checks")
 REPORTS_DIR = os.path.join(DATA_DIR, "reports")
+STALLS_DIR = os.path.join(DATA_DIR, "stalls")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 BASELINE_PATH = os.path.join(DATA_DIR, "baseline.json")
 LAYOUT_PATH = os.path.join(DATA_DIR, "my_layout.json")
@@ -338,6 +340,7 @@ class App:
         self._build_leak_tab()
         self._build_checks_tab()
         self._build_history_tab()
+        self._build_stalls_tab()
         self._build_pid_tab()
         self._build_claude_tab()
 
@@ -476,6 +479,7 @@ class App:
         self.update_leak_spots()
         self.refresh_checks()
         self.refresh_history()
+        self.refresh_stalls()
 
     def refresh_ports(self):
         ports = list_serial_ports()
@@ -763,6 +767,10 @@ class App:
                 frac = max(0.0, min(1.0, (value - rng[0]) / (rng[1] - rng[0])))
                 tile["bar"].configure(value=frac * 1000)
         self.history.append((elapsed, values))
+        if hasattr(self, "stall_watch"):
+            cap = self.stall_watch.feed(elapsed, values)
+            if cap:
+                self.stall_captured(cap)
         if getattr(self, "px_latest", None) is not None:
             self.px_latest = values
         if getattr(self, "leak_marks", None):
@@ -1493,6 +1501,8 @@ class App:
                 "charts": charts if hist else [], "codes": codes, "tests": tests,
                 "leak": leak, "leak_summary": leak_hunt.summary(done) if done else "",
                 "compare": comp, "history": hist_rows, "trends": trends,
+                "stalls": [(c["when"], c["verdict"], " ".join(c["evidence"]), c["check"])
+                           for c in self.stall_list()],
                 "claude": list(self.claude_log)}
 
     def save_report(self, open_it=True):
@@ -1742,7 +1752,8 @@ class App:
         return history.load(TESTS_DIR, CHECKS_DIR, self.vehicle_name(), self.is_obd())
 
     def history_text(self):
-        return history.text(self.history_events())
+        parts = [history.text(self.history_events()), self.stalls_text()]
+        return "\n\n".join(x for x in parts if x)
 
     def refresh_history(self):
         if not hasattr(self, "hist_tree"):
@@ -1769,6 +1780,143 @@ class App:
             t.insert("end", f"{name} ({k}): ", "b")
             t.insert("end", f"{a:g} → {b:g} over {n} runs ({wa:%b %d} to {wb:%b %d})\n")
         t.configure(state="disabled")
+
+    # ------------------------------------------------------------ Stalls
+
+    def _build_stalls_tab(self):
+        tab = ttk.Frame(self.nb, padding=10)
+        self.stalls_tab = tab
+        self.nb.add(tab, text="Stalls")
+        self.stall_watch = stall_capture.Watcher(self.vehicle_name())
+        ttk.Label(tab, wraplength=950, justify="left", text=(
+            "Always on while connected: the app keeps the last 30 seconds of readings, and when "
+            "the engine dies it saves that window and says what kind of death it looks like: "
+            "ignition reference lost, lean then died (fuel), power dropout, or a slow sag (air or "
+            "idle control). Just let it idle until it dies. Several captures that agree are worth "
+            "much more than one.")).pack(anchor="w")
+        row = ttk.Frame(tab)
+        row.pack(fill="x", pady=6)
+        self.stall_tally = ttk.Label(row, font=("Helvetica", 14, "bold"))
+        self.stall_tally.pack(side="left")
+        self.stall_demo_box = ttk.Combobox(row, state="readonly", width=26, values=[
+            "Ignition reference drops out", "Fuel delivery fails", "Slow sag"])
+        self.stall_demo_box.set("Ignition reference drops out")
+        self.stall_demo_btn = ttk.Button(row, text="Demo: make it die", command=self.stall_demo)
+        self.stall_demo_btn.pack(side="right")
+        self.stall_demo_box.pack(side="right", padx=6)
+        cols = ("when", "verdict", "evidence")
+        self.stall_tree = ttk.Treeview(tab, columns=cols, show="headings", height=8)
+        for c, w, t in (("when", 150, "When"), ("verdict", 130, "Looks like"),
+                        ("evidence", 640, "Why")):
+            self.stall_tree.heading(c, text=t)
+            self.stall_tree.column(c, width=w, anchor="w")
+        self.stall_tree.pack(fill="both", expand=True)
+        self.stall_tree.bind("<<TreeviewSelect>>", lambda e: self.show_stall())
+        self.stall_detail = tk.Text(tab, height=8, wrap="word", foreground=INK, background="white",
+                                    relief="flat", font=("Helvetica", 13), padx=10, pady=8)
+        self.stall_detail.pack(fill="x", pady=(8, 4))
+        self.stall_detail.tag_configure("b", font=("Helvetica", 13, "bold"))
+        btns = ttk.Frame(tab)
+        btns.pack(fill="x")
+        ttk.Button(btns, text="Open in Analysis", command=self.stall_analyze).pack(side="left")
+        ttk.Button(btns, text="Ask Claude about this stall", command=self.stall_ask).pack(side="left", padx=6)
+        self.refresh_stalls()
+
+    def stall_list(self):
+        return stall_capture.load_all(STALLS_DIR, self.vehicle_name())
+
+    def stalls_text(self):
+        caps = self.stall_list()[-10:]
+        if not caps:
+            return ""
+        lines = [f"Stall captures ({stall_capture.tally(caps)}):"]
+        lines += [f"- {c['when']}: {c['verdict']}. {' '.join(c['evidence'])}" for c in caps]
+        return "\n".join(lines)
+
+    def refresh_stalls(self):
+        if not hasattr(self, "stall_tree"):
+            return
+        self.stall_watch.vehicle = self.vehicle_name()
+        caps = self.stall_list()
+        self.stall_tally.configure(text=stall_capture.tally(caps) or "No stalls captured yet")
+        self.stall_tree.delete(*self.stall_tree.get_children())
+        for i, c in enumerate(caps):
+            self.stall_tree.insert("", "end", iid=str(i), values=(
+                c["when"], c["verdict"].upper(), " ".join(c["evidence"])))
+        demo = self.source_var.get() == SRC_DEMO
+        for w in (self.stall_demo_box, self.stall_demo_btn):
+            w.configure(state=("readonly" if w is self.stall_demo_box else "normal") if demo else "disabled")
+
+    def stall_captured(self, cap):
+        try:
+            stall_capture.save(STALLS_DIR, cap)
+        except OSError as e:
+            self.log(f"Couldn't save the stall capture: {e}")
+        self.log(f"Engine died. Saved the last {stall_capture.PRE_S:.0f} s: looks like {cap.verdict}.")
+        self.nb.tab(self.stalls_tab, text="Stalls ●")
+        self.refresh_stalls()
+        kids = self.stall_tree.get_children()
+        if kids:
+            self.stall_tree.selection_set(kids[-1])
+            self.show_stall()
+        self.refresh_history()
+
+    def selected_stall(self):
+        sel = self.stall_tree.selection()
+        caps = self.stall_list()
+        return caps[int(sel[0])] if sel and int(sel[0]) < len(caps) else None
+
+    def show_stall(self):
+        c = self.selected_stall()
+        self.nb.tab(self.stalls_tab, text="Stalls")
+        if not c:
+            return
+        t = self.stall_detail
+        t.configure(state="normal")
+        t.delete("1.0", "end")
+        t.insert("end", f"{c['when']}: looks like {c['verdict']}\n", "b")
+        t.insert("end", " ".join(c["evidence"]) + "\n\n")
+        t.insert("end", "What to check: ", "b")
+        t.insert("end", c["check"] + "\n")
+        t.configure(state="disabled")
+
+    def stall_analyze(self):
+        c = self.selected_stall()
+        if c and os.path.exists(c["csv"]):
+            self.analyze_log_file(c["csv"])
+
+    def stall_ask(self):
+        c = self.selected_stall()
+        if not c:
+            return
+        try:
+            summary = claude_assistant.summary_for_log(c["csv"], self.params_by_name(), self.baseline_baro())
+        except (OSError, ValueError, KeyError) as e:
+            messagebox.showerror(APP_NAME, f"Couldn't read that capture:\n{e}")
+            return
+        summary += (f"\n\nThis log is the {stall_capture.PRE_S:.0f} s before and a few seconds after the "
+                    f"engine died (elapsed_s 0 = the first zero-RPM reading). The app's pattern check "
+                    f"says: {c['verdict']}. {' '.join(c['evidence'])}") + self.extra_context()
+        self.nb.select(self.claude_tab)
+        self.claude_start(f"[stall capture {c['when']}] Why did it die, and what should I check?",
+                          claude_assistant.first_question(summary, self._car_name()))
+
+    def stall_demo(self):
+        src = getattr(self.reader, "src", None) if self.reader else None
+        if src is None or not hasattr(src, "set_mode"):
+            messagebox.showinfo(APP_NAME, "Connect to Demo: Fiero first.")
+            return
+        mode = {"Ignition reference drops out": "stall_ref", "Fuel delivery fails": "stall_fuel",
+                "Slow sag": "stall"}[self.stall_demo_box.get()]
+        src.set_mode("idle")
+        src.set_mode(mode)
+        self.log(f"Demo: {self.stall_demo_box.get().lower()}… (it dies in about 10 s)")
+        self._stall_demo_id = token = object()
+
+        def restart():
+            if self.reader and self._stall_demo_id is token:     # not replaced by a newer demo
+                src.set_mode("idle")
+        self.root.after(30000, restart)
 
     # ------------------------------------------------------------ Leak hunt
 
@@ -2747,6 +2895,15 @@ def self_test(root, app, seconds=4.0):
         res = app.test_results.get("cold_sensors")
         result["status"] = res[1].status if res else "not finished"
         result["ok"] = result["ok"] and result["status"] == guided_tests.PASS
+        # Stall capture: let the demo engine lose its ignition reference and die.
+        app.reader.src.set_mode("idle")
+        root.after(6000, lambda: (app.stall_demo_box.set("Ignition reference drops out"), app.stall_demo()))
+        root.after(22000, finish_stall)
+
+    def finish_stall():
+        caps = app.stall_list()
+        result["stall"] = caps[-1]["verdict"] if caps else "none"
+        result["ok"] = result["ok"] and result["stall"] == stall_capture.REFERENCE
         # OBD-II: the Grand Prix demo through the real ELM327 driver.
         app.disconnect()
         app.source_var.set(SRC_DEMO_OBD)
@@ -2772,7 +2929,7 @@ def self_test(root, app, seconds=4.0):
             page = f.read()
         rep_ok = "<svg" in page and "P0171" in page and "Grand Prix" in page
         result["ok"] = result["ok"] and obd_ok and rep_ok
-        print(f"{result['line']} guided_test={result['status']} "
+        print(f"{result['line']} guided_test={result['status']} stall={result.get('stall')} "
               f"obd_demo={'ok' if obd_ok else 'FAILED'} (rpm {shown}) "
               f"claude_tools={'ok' if tools_ok else 'FAILED'} report={'ok' if rep_ok else 'FAILED'} "
               f"-> {'OK' if result['ok'] else 'FAILED'}")
